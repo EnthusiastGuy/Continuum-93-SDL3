@@ -5,7 +5,7 @@ rem   build debug      Debug   -> build\debug\continuum.exe (console attached)
 rem   build linux      Docker  -> build\linux-x64, build\linux-arm64 (glibc 2.36+: Raspberry Pi OS bookworm too)
 rem   build web        Docker  -> build\web (serve with COOP/COEP headers, docs\WEB.md)
 rem   build all        release + linux + web
-rem   build boot [x64^|x86]  Docker -> bootable PC stick images, dist\continuum93-boot-*.zip (docs\BOOT.md)
+rem   build boot [x64^|x86^|rpi]  Docker -> bootable images (PCs, Raspberry Pi), dist\continuum93-boot-*.zip (docs\BOOT.md)
 setlocal EnableDelayedExpansion
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
@@ -51,11 +51,12 @@ exit /b %errorlevel%
 
 :boot
 rem Each arch builds in its own container (x86 runs natively as linux/386); the volume keeps the kernel trees.
-for %%a in (amd64:x64 386:x86) do for /f "tokens=1,2 delims=:" %%p in ("%%a") do (
+rem The Pi: its userland in an emulated arm64 container, then its kernel and image cross-built on amd64.
+for %%a in (amd64:x64:all 386:x86:all arm64:rpi:userland amd64:rpi:image) do for /f "tokens=1-3 delims=:" %%p in ("%%a") do (
     if "%~1"=="" (set "GO=1") else (set "GO=" & if /i "%~1"=="%%q" set "GO=1")
     if defined GO (
         docker build -q --platform linux/%%p -t continuum93-boot:%%p "%ROOT%\boot" >nul || exit /b 1
-        docker run --rm --platform linux/%%p -v "%ROOT%:/src" -v continuum93-boot:/cache continuum93-boot:%%p sh /src/boot/build.sh %%q || exit /b 1
+        docker run --rm --platform linux/%%p -v "%ROOT%:/src" -v continuum93-boot:/cache continuum93-boot:%%p sh /src/boot/build.sh %%q %%r || exit /b 1
     )
 )
 exit /b 0

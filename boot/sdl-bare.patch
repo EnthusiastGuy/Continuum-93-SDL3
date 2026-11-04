@@ -143,7 +143,7 @@ index 64cabb7..3557176 100644
  // Declare all the function pointers and wrappers...
  #define SDL_KMSDRM_SYM(rc, fn, params)        \
 diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.c b/src/video/kmsdrm/SDL_kmsdrmvideo.c
-index 22b1b43..9ce8a04 100644
+index 22b1b43..66a3581 100644
 --- a/src/video/kmsdrm/SDL_kmsdrmvideo.c
 +++ b/src/video/kmsdrm/SDL_kmsdrmvideo.c
 @@ -50,6 +50,8 @@
@@ -155,34 +155,39 @@ index 22b1b43..9ce8a04 100644
  #include <sys/param.h>
  #include <sys/stat.h>
  #include <sys/utsname.h>
-@@ -634,6 +636,93 @@ static void KMSDRM_DeleteDevice(SDL_VideoDevice *device)
+@@ -634,6 +636,126 @@ static void KMSDRM_DeleteDevice(SDL_VideoDevice *device)
      SDL_KMSDRM_UnloadSymbols();
  }
  
-+/* Dumb-buffer mode: with no libgbm (no Mesa), SDL renders in software straight into a mapped
-+   DRM dumb buffer. Enough for firmware framebuffers (simpledrm) and any KMS driver. */
++/* Dumb-buffer mode: with no libgbm (no Mesa), SDL renders in software into mapped DRM dumb buffers.
++   Two of them, page-flipped at vblank: KMS drivers (vc4) scan a buffer out as it is drawn, so drawing
++   into the shown one flickers (each frame starts with a clear). Drivers without page flips get one
++   buffer and DIRTYFB, which suits firmware framebuffers (simpledrm copies on DIRTYFB anyway). */
 +static void KMSDRM_GetModeToSet(SDL_Window *window, drmModeModeInfo *out_mode);
 +
 +static void KMSDRM_DestroyWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window)
 +{
 +    SDL_WindowData *windata = window->internal;
 +    int fd = _this->internal->drm_fd;
++    int i;
 +
 +    if (!windata) {
 +        return;
 +    }
-+    if (windata->dumb_map) {
-+        munmap(windata->dumb_map, windata->dumb_size);
-+        windata->dumb_map = NULL;
-+    }
-+    if (windata->dumb_fb) {
-+        KMSDRM_drmModeRmFB(fd, windata->dumb_fb);
-+        windata->dumb_fb = 0;
-+    }
-+    if (windata->dumb_handle) {
-+        struct drm_mode_destroy_dumb destroy = { windata->dumb_handle };
-+        ioctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
-+        windata->dumb_handle = 0;
++    for (i = 0; i < 2; ++i) {
++        if (windata->dumb_map[i]) {
++            munmap(windata->dumb_map[i], windata->dumb_size);
++            windata->dumb_map[i] = NULL;
++        }
++        if (windata->dumb_fb[i]) {
++            KMSDRM_drmModeRmFB(fd, windata->dumb_fb[i]);
++            windata->dumb_fb[i] = 0;
++        }
++        if (windata->dumb_handle[i]) {
++            struct drm_mode_destroy_dumb destroy = { windata->dumb_handle[i] };
++            ioctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
++            windata->dumb_handle[i] = 0;
++        }
 +    }
 +}
 +
@@ -194,62 +199,90 @@ index 22b1b43..9ce8a04 100644
 +    struct drm_mode_create_dumb create;
 +    struct drm_mode_map_dumb map;
 +    void *mapped;
-+    int w, h;
++    int w, h, i;
 +
 +    KMSDRM_DestroyWindowFramebuffer(_this, window);
 +    KMSDRM_GetModeToSet(window, &dispdata->mode);
 +
 +    // SDL sizes the surface from the window: never let it outgrow the buffer.
 +    SDL_GetWindowSizeInPixels(window, &w, &h);
-+    SDL_zero(create);
-+    create.width = SDL_max(w, dispdata->mode.hdisplay);
-+    create.height = SDL_max(h, dispdata->mode.vdisplay);
-+    create.bpp = 32;
-+    if (ioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
-+        return SDL_SetError("KMSDRM: cannot create a dumb buffer: %s", strerror(errno));
-+    }
-+    windata->dumb_handle = create.handle;
-+    windata->dumb_size = (size_t)create.size;
++    for (i = 0; i < 2; ++i) {
++        SDL_zero(create);
++        create.width = SDL_max(w, dispdata->mode.hdisplay);
++        create.height = SDL_max(h, dispdata->mode.vdisplay);
++        create.bpp = 32;
++        if (ioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
++            SDL_SetError("KMSDRM: cannot create a dumb buffer: %s", strerror(errno));
++            KMSDRM_DestroyWindowFramebuffer(_this, window);
++            return false;
++        }
++        windata->dumb_handle[i] = create.handle;
++        windata->dumb_size = (size_t)create.size;
 +
-+    SDL_zero(map);
-+    map.handle = create.handle;
-+    if (KMSDRM_drmModeAddFB(fd, create.width, create.height, 24, 32, create.pitch, create.handle, &windata->dumb_fb) ||
-+        ioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map) < 0 ||
-+        (mapped = mmap(NULL, windata->dumb_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, map.offset)) == MAP_FAILED) {
-+        SDL_SetError("KMSDRM: cannot map the dumb buffer: %s", strerror(errno));
-+        KMSDRM_DestroyWindowFramebuffer(_this, window);
-+        return false;
++        SDL_zero(map);
++        map.handle = create.handle;
++        if (KMSDRM_drmModeAddFB(fd, create.width, create.height, 24, 32, create.pitch, create.handle, &windata->dumb_fb[i]) ||
++            ioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map) < 0 ||
++            (mapped = mmap(NULL, windata->dumb_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, map.offset)) == MAP_FAILED) {
++            SDL_SetError("KMSDRM: cannot map the dumb buffer: %s", strerror(errno));
++            KMSDRM_DestroyWindowFramebuffer(_this, window);
++            return false;
++        }
++        windata->dumb_map[i] = mapped;
++        SDL_memset(mapped, 0, windata->dumb_size);
 +    }
-+    windata->dumb_map = mapped;
-+    SDL_memset(mapped, 0, windata->dumb_size);
 +
-+    if (KMSDRM_drmModeSetCrtc(fd, dispdata->crtc.crtc->crtc_id, windata->dumb_fb, 0, 0,
++    if (KMSDRM_drmModeSetCrtc(fd, dispdata->crtc.crtc->crtc_id, windata->dumb_fb[0], 0, 0,
 +                              &dispdata->connector.connector->connector_id, 1, &dispdata->mode)) {
 +        SDL_SetError("KMSDRM: cannot show the dumb buffer: %s", strerror(errno));
 +        KMSDRM_DestroyWindowFramebuffer(_this, window);
 +        return false;
 +    }
++    windata->dumb_back = 1;
++    windata->dumb_flip = true;
++    SDL_Log("KMSDRM: %dx%d dumb buffers, page-flipped at vblank", dispdata->mode.hdisplay, dispdata->mode.vdisplay);
 +
 +    *format = SDL_PIXELFORMAT_XRGB8888;
-+    *pixels = mapped;
++    *pixels = windata->dumb_map[1];
 +    *pitch = (int)create.pitch;
 +    return true;
 +}
 +
 +static bool KMSDRM_UpdateWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int numrects)
 +{
-+    // Drivers that copy to the real framebuffer (simpledrm) need to hear what changed; the rest ignore it.
++    SDL_WindowData *windata = window->internal;
++    SDL_DisplayData *dispdata = SDL_GetDisplayDriverDataForWindow(window);
++    int fd = _this->internal->drm_fd;
 +    struct drm_mode_fb_dirty_cmd dirty;
++
++    if (windata->dumb_flip) {
++        // Show the finished frame at the next vblank, then draw into the buffer that was on screen.
++        windata->waiting_for_flip = true;
++        if (KMSDRM_drmModePageFlip(fd, dispdata->crtc.crtc->crtc_id, windata->dumb_fb[windata->dumb_back],
++                                   DRM_MODE_PAGE_FLIP_EVENT, &windata->waiting_for_flip) == 0) {
++            KMSDRM_WaitPageflip(_this, windata);
++            windata->dumb_back ^= 1;
++            window->surface->pixels = windata->dumb_map[windata->dumb_back];
++            return true;
++        }
++        windata->waiting_for_flip = false;
++        // No page flips: show the buffer SDL draws into and keep it.
++        windata->dumb_flip = false;
++        SDL_Log("KMSDRM: no page flips (%s); one buffer, drawn on screen", strerror(errno));
++        KMSDRM_drmModeSetCrtc(fd, dispdata->crtc.crtc->crtc_id, windata->dumb_fb[windata->dumb_back], 0, 0,
++                              &dispdata->connector.connector->connector_id, 1, &dispdata->mode);
++    }
++    // Drivers that copy to the real framebuffer (simpledrm) need to hear what changed; the rest ignore it.
 +    SDL_zero(dirty);
-+    dirty.fb_id = window->internal->dumb_fb;
-+    ioctl(_this->internal->drm_fd, DRM_IOCTL_MODE_DIRTYFB, &dirty);
++    dirty.fb_id = windata->dumb_fb[windata->dumb_back];
++    ioctl(fd, DRM_IOCTL_MODE_DIRTYFB, &dirty);
 +    return true;
 +}
 +
  static SDL_VideoDevice *KMSDRM_CreateDevice(void)
  {
      SDL_VideoDevice *device;
-@@ -687,16 +776,22 @@ static SDL_VideoDevice *KMSDRM_CreateDevice(void)
+@@ -687,16 +809,22 @@ static SDL_VideoDevice *KMSDRM_CreateDevice(void)
      device->DestroyWindow = KMSDRM_DestroyWindow;
      device->SetWindowFocusable = KMSDRM_SetWindowFocusable;
  
@@ -282,7 +315,7 @@ index 22b1b43..9ce8a04 100644
  
  #ifdef SDL_VIDEO_VULKAN
      device->Vulkan_LoadLibrary = KMSDRM_Vulkan_LoadLibrary;
-@@ -1738,7 +1833,9 @@ static void KMSDRM_GetModeToSet(SDL_Window *window, drmModeModeInfo *out_mode)
+@@ -1738,7 +1866,9 @@ static void KMSDRM_GetModeToSet(SDL_Window *window, drmModeModeInfo *out_mode)
      SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
      SDL_DisplayData *dispdata = display->internal;
  
@@ -293,7 +326,7 @@ index 22b1b43..9ce8a04 100644
          *out_mode = dispdata->fullscreen_mode;
      } else {
          drmModeModeInfo *mode = KMSDRM_GetClosestDisplayMode(display, window->windowed.w, window->windowed.h);
-@@ -1902,7 +1999,7 @@ static void KMSDRM_ReleaseVT(void *userdata)
+@@ -1902,7 +2032,7 @@ static void KMSDRM_ReleaseVT(void *userdata)
  
      for (i = 0; i < viddata->num_windows; i++) {
          SDL_Window *window = viddata->windows[i];
@@ -302,7 +335,7 @@ index 22b1b43..9ce8a04 100644
              KMSDRM_DestroySurfaces(_this, window);
          }
      }
-@@ -1918,7 +2015,7 @@ static void KMSDRM_AcquireVT(void *userdata)
+@@ -1918,7 +2048,7 @@ static void KMSDRM_AcquireVT(void *userdata)
      KMSDRM_drmSetMaster(viddata->drm_fd);
      for (i = 0; i < viddata->num_windows; i++) {
          SDL_Window *window = viddata->windows[i];
@@ -311,7 +344,7 @@ index 22b1b43..9ce8a04 100644
              KMSDRM_CreateSurfaces(_this, window);
          }
      }
-@@ -2144,7 +2241,17 @@ bool KMSDRM_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Propert
+@@ -2144,7 +2274,17 @@ bool KMSDRM_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Propert
          windata->double_buffer = true;
      }
  
@@ -331,19 +364,21 @@ index 22b1b43..9ce8a04 100644
          /* Maybe you didn't ask for an OPENGL window, but that's what you will get.
             See following comments on why. */
 diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.h b/src/video/kmsdrm/SDL_kmsdrmvideo.h
-index 67ec518..c544197 100644
+index 67ec518..f661289 100644
 --- a/src/video/kmsdrm/SDL_kmsdrmvideo.h
 +++ b/src/video/kmsdrm/SDL_kmsdrmvideo.h
-@@ -177,6 +177,12 @@ struct SDL_WindowData
+@@ -177,6 +177,14 @@ struct SDL_WindowData
  
      /* This dictates what approach we'll use for SwapBuffers. */
      bool (*swap_window)(SDL_VideoDevice *_this, SDL_Window *window);
 +
-+    // Dumb-buffer mode (no GBM): the window framebuffer, mapped and scanned out as is.
-+    uint32_t dumb_handle;
-+    uint32_t dumb_fb;
-+    void *dumb_map;
++    // Dumb-buffer mode (no GBM): two window framebuffers, SDL draws into dumb_back while the other is shown.
++    uint32_t dumb_handle[2];
++    uint32_t dumb_fb[2];
++    void *dumb_map[2];
 +    size_t dumb_size;
++    int dumb_back;
++    bool dumb_flip;   // page flips work; false: one buffer, shown as SDL draws into it
  };
  
  typedef struct KMSDRM_FBInfo

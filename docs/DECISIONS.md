@@ -343,3 +343,22 @@ Measured on the running reference and settled to its usual outcome, deterministi
 - The mouse maps back to 270 lines (main.cpp pollInput). The service view stays square (host pixels).
 - The boot stick's init.cfg is main.cpp's kDefaults with `crtFilter=false` (boot/build.sh extracts it): firmware
   framebuffers can be large and the CPUs these sticks target small.
+
+## D-40 Raspberry Pi boot image: Raspberry Pi's kernel tree, vc4 KMS, one kernel8.img — DECIDED 2026-11-04 (user: "continue with the raspberry pi images"; Pi 3 onward)
+- Kernel: Raspberry Pi's tree at tag `stable_20261103` (Linux 6.18.60, the PCs' version), not mainline: the Pi 5's
+  RP1 (its USB), the Pi 4's VL805, dwc_otg and the SD controllers work there as on Raspberry Pi OS. Base is their
+  `bcm2711_defconfig` with modules dropped (mod2noconfig), not tinyconfig: the SoC glue (clocks, mailbox, power
+  domains, pinctrl) cannot be tested without hardware, so it is taken whole. Server/debug features, network and
+  other filesystems are switched off in `boot/kernel-rpi.config` (13.2 → 10.5 MB gzip).
+- One arm64 `kernel8.img` (4K pages) for Pi 3, Zero 2 W, 4, 400, 5, 500; the firmware unpacks its gzip.
+- Display: vc4 KMS (`dtoverlay=vc4-kms-v3d`), the Raspberry Pi OS default on every model; the firmware's own
+  framebuffer is legacy-only and has no Pi 5 path. HDMI at the monitor's EDID mode, HDMI audio through ASoC.
+- Firmware files from raspberrypi/firmware 1.20260915 (bootcode.bin, start/fixup for Pi 3, start4/fixup4 for Pi 4;
+  the Pi 5 boots from its EEPROM), full rather than the cut-down `_cd` ones: smaller, but documented for gpu_mem=16.
+- Build: the emulator in an emulated linux/arm64 container (as the linux-arm64 zip, D-32), the kernel
+  cross-built by clang (`LLVM=-16`) in the amd64 one: emulated it would take hours. The initramfs files are staged
+  in the cache volume (`/cache/rpi/root`) so the second container sees them.
+- Two dumb buffers, page-flipped (user, Pi Zero 2 W: "a black flicker which seems to match the frame rate"): SDL's
+  software renderer clears then draws each frame, and vc4 scans out the buffer it draws into. The flip waits for
+  vblank (SDL's own KMSDRM_WaitPageflip), so frames are vsynced. simpledrm accepts flips too (PCs use the same
+  path, checked in QEMU); a driver that refuses them falls back to the old single buffer + DIRTYFB.

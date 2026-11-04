@@ -1,6 +1,6 @@
 #!/bin/sh
 # Boot-image test in QEMU (KVM), run in the container from boot/test/Dockerfile (docs/BOOT.md, "Testing"):
-#   run.sh <img> <bios|uefi|uefi32> <seconds> [steps...]
+#   run.sh <img> <bios|uefi|uefi32|rpi3> <seconds> [steps...]
 # Screenshots after <seconds> (/out/<fw>/shot1.png), runs the steps (a QEMU sendkey name, m:<monitor
 # command> such as "m:mouse_move 50 50", or t:<text> typed + Enter), screenshots again (shot2.png), then
 # copies the stick's logs to /out/<fw>/continuum93 and its Data/init.cfg to /out/<fw>. Audio lands in audio.wav, serial in serial.txt.
@@ -18,12 +18,23 @@ if [ $FW = uefi ]; then
   cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/vars.fd
   FWARGS="-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=/tmp/vars.fd"
 fi
+if [ $FW = rpi3 ]; then
+  # A Pi 3 (TCG, no KVM): QEMU stands in for the Pi's firmware, so it is given kernel8.img and the device tree
+  # off the card, and no config.txt overlay: there is no vc4 display, the serial console shows the boot instead.
+  export MTOOLS_SKIP_CHECK=1
+  mcopy -n -i /tmp/t.img@@1048576 ::/kernel8.img ::/bcm2710-rpi-3-b.dtb /tmp/
+  qemu-system-aarch64 -M raspi3b -kernel /tmp/kernel8.img -dtb /tmp/bcm2710-rpi-3-b.dtb \
+    -drive if=sd,format=raw,file=/tmp/t.img -usb -device usb-kbd -device usb-mouse \
+    -append "console=ttyAMA0 loglevel=6 ${APPEND}" \
+    -display none -serial file:$O/serial.txt -monitor unix:/tmp/mon,server,nowait &
+else
 QEMU=${QEMU:-qemu-system-x86_64}
 $QEMU -enable-kvm -m 1024 -smp 2 -machine $MACHINE $FWARGS -vga std \
   -device qemu-xhci -drive if=none,id=stick,format=raw,file=/tmp/t.img -device usb-storage,drive=stick \
   -device usb-kbd -device usb-mouse \
   -audiodev wav,id=a,path=$O/audio.wav -device intel-hda -device hda-duplex,audiodev=a \
   -display none -serial file:$O/serial.txt -monitor unix:/tmp/mon,server,nowait ${KERNEL:+-kernel $KERNEL} ${APPEND:+-append "$APPEND"} &
+fi
 mon() { echo "$1" | socat - unix-connect:/tmp/mon >> $O/mon.txt; }
 # type <text>: one sendkey per char, then Enter
 type() { echo "$1" | fold -w1 | while IFS= read -r c; do case "$c" in

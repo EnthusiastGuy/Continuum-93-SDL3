@@ -11,6 +11,7 @@ mkdir -p /mnt/c93
 found=
 for try in $(seq 100); do
     for b in /sys/class/block/*; do
+        case ${b##*/} in loop*|ram*|zram*) continue ;; esac
         mount -t vfat -o noatime,flush /dev/${b##*/} /mnt/c93 2>/dev/null || continue
         [ -d /mnt/c93/Data/os ] && { found=${b##*/}; break 2; }
         umount /mnt/c93
@@ -22,11 +23,17 @@ if [ -z "$found" ]; then
     exec sh
 fi
 
+# The display: a KMS driver (the Pi's vc4) can still be probing when the stick is up. Wait up to 5 s.
+for try in $(seq 50); do
+    [ -e /dev/dri/card0 ] && break
+    sleep 0.1
+done
+
 # Logs (the emulator's and the kernel's) land on the stick: continuum93/logs/.
 export XDG_STATE_HOME=/mnt/c93 HOME=/tmp
 mkdir -p /mnt/c93/continuum93/logs
 dmesg > /mnt/c93/continuum93/logs/kernel.log
-export LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/lib/i386-linux-gnu
+export LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/lib/i386-linux-gnu:/lib/aarch64-linux-gnu
 # ALSA starts every mixer muted at 0: open up the usual outputs on each card (alongside the emulator's start).
 for c in /dev/snd/controlC*; do
     for s in Master PCM Speaker Headphone Front 'Line Out'; do amixer -q -c ${c##*C} sset "$s" 90% unmute 2>/dev/null; done

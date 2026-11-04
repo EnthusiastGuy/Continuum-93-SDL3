@@ -6,7 +6,7 @@
 #   ./build.sh linux    Docker  -> build/linux-x64, build/linux-arm64 (glibc 2.36+: Raspberry Pi OS bookworm too)
 #   ./build.sh web      Docker  -> build/web (serve with COOP/COEP headers, docs/WEB.md)
 #   ./build.sh all      release + linux + web
-#   ./build.sh boot [x64|x86]  Docker -> bootable PC stick images, dist/continuum93-boot-*.zip (docs/BOOT.md)
+#   ./build.sh boot [x64|x86|rpi]  Docker -> bootable images (PCs, Raspberry Pi), dist/continuum93-boot-*.zip (docs/BOOT.md)
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 EMSDK=emscripten/emsdk:6.0.13
@@ -45,11 +45,13 @@ web() {
 
 # Each arch builds in its own container (x86 runs natively as linux/386); the volume keeps the kernel trees.
 boot() {
-    for a in amd64:x64 386:x86; do
-        p=${a%:*} n=${a#*:}
+    # The Pi: its userland in an emulated arm64 container, then its kernel and image cross-built on amd64.
+    for a in amd64:x64:all 386:x86:all arm64:rpi:userland amd64:rpi:image; do
+        p=${a%%:*} s=${a##*:} n=${a#*:}
+        n=${n%:*}
         [ -z "$1" ] || [ "$1" = $n ] || continue
         docker build -q --platform linux/$p -t continuum93-boot:$p "$ROOT/boot" >/dev/null
-        docker run --rm --platform linux/$p -v "$ROOT:/src" -v continuum93-boot:/cache continuum93-boot:$p sh /src/boot/build.sh $n
+        docker run --rm --platform linux/$p -v "$ROOT:/src" -v continuum93-boot:/cache continuum93-boot:$p sh /src/boot/build.sh $n $s
     done
 }
 
@@ -60,5 +62,5 @@ case "$1" in
     web)   web ;;
     all)   native Release; linux; web ;;
     boot)  boot "$2" ;;
-    *)     echo "usage: $0 [debug|linux|web|all|boot [x64|x86]]"; exit 1 ;;
+    *)     echo "usage: $0 [debug|linux|web|all|boot [x64|x86|rpi]]"; exit 1 ;;
 esac

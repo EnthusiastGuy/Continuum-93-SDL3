@@ -3,11 +3,29 @@
 Read this first in every session. Update it at the end of every work block.
 
 **Current phase:** 10 — boot images (D-38, docs/BOOT.md); phase 9 packaging done apart from its open checks below
-**Next action:** the user tries `dist/continuum93-boot-x64.zip` (and x86) on real PCs: write the .img to a stick,
-boot with Secure Boot off (if the picture is stretched: Shift+F11 until it looks right, D-39), then read `continuum93/logs/` (continuum.log, kernel.log) off the stick. Fix what real
-hardware shows (likely: GOP mode / speed on big screens, HDA card choice, laptop touchpads). Raspberry Pi image
-after that. Still open from phase 9: asm/BASIC suites on Windows after D-37 (expect 129/129, 341/341), the
-linux-arm64 zip on a real Pi. Branch `feature/bootimage`, not committed.
+**Next action:** the user tries the images on real hardware and sends back `continuum93/logs/` (continuum.log,
+kernel.log) from the stick/card. PCs: `dist/continuum93-boot-x64.zip` (and x86), Secure Boot off; stretched picture:
+Shift+F11 (D-39). Pi: `dist/continuum93-boot-rpi.zip` on an SD card, Pi 3/4/5; its display (vc4), input and sound
+are untested (QEMU has no vc4), so check those first (flicker fix: retest on the Zero 2 W). Fix what real hardware shows (likely: GOP mode on big screens,
+the ALSA card choice, laptop touchpads; on the Pi, vc4 bring-up). Still open from phase 9: asm/BASIC suites on
+Windows after D-37 (expect 129/129, 341/341), the linux-arm64 zip on a real Pi. Branch `feature/bootimage`
+(PC images and D-39 committed as 642c678; the Pi image is not committed yet).
+
+### 2026-11-04 — Raspberry Pi boot image (D-40)
+- User, Pi Zero 2 W: boots, Halcyon runs (slow); a black flicker at the frame rate; one boot of four had
+  "kmsdrm not available". Fixed: SDL patch double-buffers with page flips (D-40), init waits up to 5 s for
+  /dev/dri/card0. Checked in QEMU on PCs (x64 BIOS + UEFI, x86 UEFI32): picture, mouse, guest shutdown; the log says
+  "KMSDRM: 1024x768 dumb buffers, page-flipped at vblank". The Pi side needs the user's retest.
+- `build boot rpi` → `dist/continuum93-boot-rpi.zip` (14 MB; 64 MB FAT32 card image): Pi firmware 1.20260915,
+  `kernel8.img` (10.4 MB gzip, Raspberry Pi kernel `stable_20261103` = 6.18.60, initramfs inside), the bcm2710/
+  2711/2712 device trees, the vc4-kms-v3d overlays, config.txt, cmdline.txt. The userland (steps 1-3) builds in
+  linux/arm64 (emulated), the kernel and card (4-5) on amd64 with clang; `boot/build.sh <arch> [userland|image]`.
+- Kernel fragments split: `kernel.config` (common) + `kernel-pc.config` / `kernel-rpi.config`. The x64 kernel
+  .config is byte-identical to before the split (diffed). The initramfs files are now staged in `/cache/<arch>/root`;
+  the duplicate libdrm/libasound list entries are gone. init skips loop/ram block devices.
+- Verified in QEMU 7.2 `raspi3b` (TCG): kernel boots, SD card mounts, emulator starts and stops at "kmsdrm not
+  available" (QEMU applies no overlay: expected), powers down at 3.7 s; dwc_otg finds QEMU's USB keyboard.
+  `boot/test/run.sh ... rpi3` does this. Not verified: vc4 display, HDMI/jack sound, input, Pi 4/5 at all.
 
 ### 2026-11-04 — boot images for PCs (D-38)
 - `build boot [x64|x86]` → `dist/continuum93-boot-<x64|x86>.zip` (7.5 / 8 MB): a 64 MB FAT32 stick image. Linux
