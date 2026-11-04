@@ -1,0 +1,4 @@
+a = MOUSE
+b = MOUSE + 1
+c = MOUSE Z
+PRINT MOUSE

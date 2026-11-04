@@ -1,0 +1,4 @@
+LET = 255
+LET = -7
+GOSUB L2
+GOSUB Sub

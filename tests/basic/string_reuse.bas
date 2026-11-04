@@ -1,0 +1,5 @@
+PRINT "same"
+PRINT "same"
+x$ = "same"
+y$ = "other"
+y$ = "same"

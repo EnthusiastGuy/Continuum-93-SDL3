@@ -1,0 +1,8 @@
+DIM a(10)
+DIM b#(5)
+DIM s$(3)
+DIM m(2, 3)
+DIM z(0)
+DIM n(-1)
+DIM v(x)
+DIM big(40)

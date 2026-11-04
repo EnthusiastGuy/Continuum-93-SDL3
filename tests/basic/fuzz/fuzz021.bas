@@ -1,0 +1,6 @@
+REPEAT
+  b = 2
+  Y = 1 >= NOT ATAN((t$[32])) ROL (31)
+UNTIL MOUSE X ROR 65535 < 5 NAND TAN(0.25) OR CHR$(3.0, (NOT POW((PEEK16(0)), "hi") * COS()), s$ IMPLY INKEY $) MOD Y[NOT (x[NOT x]) SHR 65535]
+INPUT "p"; y
+b . 10

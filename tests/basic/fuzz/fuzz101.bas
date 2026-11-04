@@ -1,0 +1,28 @@
+IF EXP(31 - b[-32] * 10 SHL SQR((CEIL(PEEK32(SQR(NOT ROUND((Y), -1, VARPTR(X)), VARPTR(i)))) ROL RIGHT$()))) THEN
+  SLEEP NOT 1.5 + MOUSE Y + n MOD LTRIM(-g#) IMPLY ((10) ROR -7 >= PEEK(VARPTR(arr))) SHL 2 MOD LTRIM("x\ny") \ (POW(n, VARPTR(a))) / (X + INKEY)
+ELSEIF i NAND "hi" OR -MAX(0.25, (""), SIN(b)) ROR y[X] / (INKEY) THEN
+  DIM g#((POW(NOT (arr) NAND i SHR (-7), PEEK(MOUSE X), (-1) = 32 + f# ROL RIGHT(2))) * a ^ -CHR(f#, 10, f#) ROR (0) OR -255 \ 65535 SHL t$[(X)] >= (INKEY), (NOT (a XNOR a) ROL TICKS MOD MIN() NAND NOT E XNOR LEFT(Y, MOUSE BUTTON t$) ^ -INSTR() SHL 31))
+  PRINT (PEEK(-1 OR PEEK((TICKS)))) XOR E OR a
+  DIM f#(0.25 + ((-2.5) + PEEK24(-arr) SHR TRIM()) OR "a b", (INT(PEEK16(f#) = 0 XNOR PEEK24(1.5), -2.5) * g#[0 < PEEK16(255)] ROR SQR(MOUSE Y) > PEEK16(2) + 1))
+ELSE
+  WHILE ("hi")
+    WHILE s$ + MIN(VAL((i))) IMPLY -2.5
+      BEEP (y) NAND VARPTR(arr) SHR t$, VARPTR(Y) < INKEY + y[1.5] < "hi" <> SIN(PEEK(1.5), s$, "") OR 1 ROL Y < "a b" XNOR LCASE(2, 0) XOR Y
+      LOAD FONT Y NAND NOT b ROL PEEK32(5) <= NOT "x\ny" - TRIM(y, x, RTRIM()) ^ X ROR -2.5 + (RND() < 0) <> TICKS, 0
+    WEND
+    DATA EXP() ^ 10 XOR NOT f#, (a OR 10 OR -(a[SQR(0, 1.5, INT(2, b))] MOD 1)) ROR 65535 SHR (31 <= ("x\ny") XOR f# + PEEK(3.0) / INKEY $ MOD PEEK((s$[(INKEY)])) \ 1)
+  WEND
+  IF 1e3 XOR PEEK24(Y) = "a b" XNOR -x IMPLY 65535 XOR -E * MOUSE BUTTON PEEK16(s$) ROL (RND()) THEN
+    DIM X((X) OR f# XNOR X OR EXP() MOD 1e3, Y NAND RIGHT$((PEEK(b)) MOD TIME SHL INT(STR$(SGN(NOT (LTRIM())), X, 10), 31, ATAN((LTRIM((x), s$, MOUSE X)), arr)), -255 NAND (X) + 31 AND COS()))
+    RECTANGLE FILLED TAN(VARPTR(s$), -7) XNOR -(TIME) NOR 3.0 = s$ \ MOUSE Y XNOR 255 >= 32, 5, 2, 1.5
+    y = (NOT ("a b") ROR a SHR INKEY $ > VARPTR(a) <> y + arr > -"a b" ROR VARPTR(arr))
+  ELSEIF VARPTR(f#) > -0.25 THEN
+    b( = (PI)
+  ELSE
+    s$ = ASC()
+    SPRITE 10 AND SIN(), VARPTR(t$) <> 65535, 1e3 NAND 2 > INT(0.25 = VARPTR(b), PEEK24(VARPTR(t$)) ROR NOT INKEY $, PEEK16(SGN(-a[n]))) * n, RIGHT$() XNOR (0.25), PEEK(10 IMPLY Y > 255 MOD E NAND (X <> NOT ((PEEK16(t$)) NOR a))), "a b" SHL "hi"
+  ENDIF
+  f# = Y NAND 0.25
+END IF
+INPUT t$
+PRINT AT b, STRING((5), -VARPTR(Y) \ VARPTR(s$) - 65535) - NOT Y; VARPTR(g#) USING RIGHT$(MOUSE X) XOR NOT x MOD (NOT MOUSE X = "" SHL NOT ABS() XOR 2), (SIN(-10 NAND PEEK(b) ROL INKEY SHR 31 <> (VARPTR(i) NOR PEEK24(n)) < STRING(Y, LEFT(31)) OR (10), (-7 * -2.5) XNOR 1 / (VAL() IMPLY "hi" XOR (n) XOR "hi"), (STR(VARPTR(Y), 65535, LCASE(VARPTR(Y), (MOUSE Y), PEEK32(LEN(y, 10, PEEK(MOUSE Y))))) IMPLY LEFT$(0.25, (32), "a b") AND PEEK16(1) - TIME ROL (RND(65535, PEEK32(3.0)) > -MID("", f#, 1.5))))), PEEK24(10 <> (g#) - VARPTR(b) <= x ROL (VARPTR(X)) OR 255)

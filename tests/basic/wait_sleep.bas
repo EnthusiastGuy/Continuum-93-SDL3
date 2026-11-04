@@ -1,0 +1,5 @@
+WAIT 10
+SLEEP 1000
+x = 5
+WAIT x
+SLEEP x * 100

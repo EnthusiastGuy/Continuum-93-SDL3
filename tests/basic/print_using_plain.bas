@@ -1,0 +1,1 @@
+PRINT "x" USING 1, 2

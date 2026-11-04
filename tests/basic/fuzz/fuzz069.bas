@@ -1,0 +1,5 @@
+PRINT AT 0.25, f#; (X) = -1 <> PEEK24((-2.5)) ROL Y <= RND((FIX((255), LEFT(), 10)), (10)) = 255
+f# = ""
+GOSUB , L1
+DIM g#(LEFT$(), VARPTR(Y))
+LINE 65535, -1, (X ROL s$ SHL TAN(LEFT$((f#), 0), PEEK24(-(TICKS))) ROL (X[RND(STR(PEEK(255)), 1)] XOR LEN(a, PEEK24(VARPTR(f#))) XNOR NOT SQR(y) - (g#)) XNOR (0)), (0) XNOR VARPTR(s$) ROR (STRING())

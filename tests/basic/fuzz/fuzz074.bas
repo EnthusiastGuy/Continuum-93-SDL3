@@ -1,0 +1,17 @@
+PRINT (VAL() <> RTRIM(X[y[(VAL())]]) ^ 1.5 < -1 OR (x) XNOR (n) \ 0.25 SHL 65535 SHL NOT Y > i), b, VARPTR(y) NOR PEEK16(-1) NAND (VARPTR(i)) XNOR (VARPTR(y)) <> "a b" = b <> "hi"
+IF (PEEK16((PEEK32((PEEK16(3.0) SHR NOT "hi") ^ 1e3)))) THEN
+  PRINT (y); (-7); (-7 <> STRING() OR 5 SHL "" ^ MOUSE BUTTON "x\ny" NAND 65535 <= "a b")
+  CIRCLE 3.0, 255 OR POW(), NOT NOT 10 NAND 1.5 NAND 2 ROR "a b" <= NOT a / --LCASE(VARPTR(t$), 65535, LTRIM(PEEK(VARPTR(b)))) + ROUND(PEEK16(-7), a[NOT b]) XOR MIN() > -(arr) NAND 65535 IMPLY -7 - COS(VARPTR(Y))
+  0b2 n = x
+ELSEIF PEEK(-VARPTR(x) = FLOOR(65535, MOUSE X, CEIL(-INSTR(VARPTR(f#), (CEIL())), TAN(y, -32))) ^ 32) THEN
+  CIRCLE FILLED g#[-7], VARPTR(f#), CHR$(2, 10) + PEEK16(VARPTR(x)) >= 5 + arr * ((255) * (RTRIM(NOT 1.5))) IMPLY UCASE(Y, 65535) + 1
+ELSEIF NOT t$[1] NAND 3.0 XOR TAN((PEEK24(Y[PEEK24(TIME)])), 65535) AND ("x\ny") SHR (PI XOR INKEY $) SHL (1e3 AND -1 + X ROR (n) ROL 255 XOR "" IMPLY (y)) THEN
+  DIM y(((CHR$(5) MOD MID$(RIGHT(), "") SHL RIGHT(32, 3.0) IMPLY 1.5) SHR 31 ROR CEIL(g#) NAND (NOT X SHL PEEK(-7))) OR (g# + 1e3 > -f#) SHR g# XOR PEEK24(FIX(Y, (f#))) SHR -31 SHL ABS(5, arr, -1))
+  t$ = 1.5
+ELSE
+  BEEP PEEK16("a b") + PEEK32(TICKS) > VARPTR(t$) XOR x NAND UCASE() < STRING() = -1 >= 10, 5
+  LOAD FONT (255), -7 XNOR POW(STRING(), 10, NOT -1) ROR (CHR("x\ny", MOUSE BUTTON PEEK24(PEEK(VARPTR(g#))))) AND -POW(255, NOT VARPTR(i), 3.0) <= MOUSE X >= LCASE(x, MOUSE Y) MOD MIN(5) = FLOOR("x\ny") - VARPTR(x)
+  s$ = n[((SQR(255, 1.5)) NOR VARPTR(g#) < s$ ROL n)]
+END IF
+GOTO Main
+SPRITE (((g#) NOR Y AND 255 XNOR 32) - NOT PEEK24("a b") OR VARPTR(i)) <> -(STR$(NOT a[10], b[255], 10) / (PEEK32("hi")) \ INSTR(INSTR(1.5, -"x\ny", i), 65535, --1) <> (VARPTR(y))) <= arr NAND s$ < PI NAND f#[31], (VAL() ^ UCASE() = 5 MOD NOT VARPTR(n) - 31) * "", (VARPTR(g#)) XNOR (32 < n >= "x\ny" NAND a OR ABS(10 MOD PEEK24(g#))), 65535, NOT VARPTR(Y), PEEK32((PEEK24(-7) < x - (3.0 ROL i = 1)))

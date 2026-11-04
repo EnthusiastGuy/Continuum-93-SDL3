@@ -1,0 +1,5 @@
+POKE 1
+MEMCOPY 1, 2
+MEMFILL 1
+x = PEEK 1
+y = PEEK(1

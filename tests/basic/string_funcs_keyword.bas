@@ -1,0 +1,12 @@
+s$ = "Hello World"
+a$ = LEFT$(s$, 3)
+b$ = RIGHT$(s$, 3)
+c$ = MID$(s$, 2, 3)
+d$ = CHR$(65)
+e$ = STR$(42)
+f$ = STRING$(3, "x")
+g$ = UCASE$(s$)
+h$ = LCASE$(s$)
+i$ = TRIM$(s$)
+j$ = LTRIM$(s$)
+k$ = RTRIM$(s$)

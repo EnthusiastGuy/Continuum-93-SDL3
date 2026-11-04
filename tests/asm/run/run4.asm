@@ -1,0 +1,5 @@
+#ORG 0x1000
+#RUN 0x100
+#RUN 0x200
+#RUN .x
+.x  NOP

@@ -1,0 +1,201 @@
+; steps: 2000
+#ORG 0x080000
+    LD ABCD, 12345
+    RAND F1, ABCD
+    LD (0x100000), F1
+    LD A, 0
+    RAND A
+    LD (0x100010), A
+    LD A, 10
+    RAND A
+    LD (0x100014), A
+    LD BC, 0
+    RAND BC
+    LD (0x100018), BC
+    LD BC, 1000
+    RAND BC
+    LD (0x10001C), BC
+    LD DEF, 0
+    RAND DEF
+    LD (0x100020), DEF
+    LD DEF, 70000
+    RAND DEF
+    LD (0x100024), DEF
+    LD GHIJ, 0
+    RAND GHIJ
+    LD (0x100028), GHIJ
+    LD GHIJ, 0xFFFFFFFF
+    RAND GHIJ
+    LD (0x10002C), GHIJ
+    LD GHIJ, 7
+    RAND GHIJ
+    LD (0x100030), GHIJ
+    LD GHIJ, 1
+    RAND GHIJ
+    LD (0x100034), GHIJ
+    RAND A, 7
+    LD (0x100038), A
+    RAND A, 0
+    LD (0x10003C), A
+    RAND BC, 50000
+    LD (0x100040), BC
+    RAND DEF, 0xFFFFFF
+    LD (0x100044), DEF
+    RAND GHIJ, 0xFFFFFFFF
+    LD (0x100048), GHIJ
+    RAND GHIJ, 100
+    LD (0x10004C), GHIJ
+    RAND GHIJ, 0
+    LD (0x100050), GHIJ
+    RAND F2
+    LD (0x100054), F2
+    LD A, 0
+    RAND A
+    LD (0x100058), A
+    LD A, 10
+    RAND A
+    LD (0x10005C), A
+    LD BC, 0
+    RAND BC
+    LD (0x100060), BC
+    LD BC, 1000
+    RAND BC
+    LD (0x100064), BC
+    LD DEF, 0
+    RAND DEF
+    LD (0x100068), DEF
+    LD DEF, 70000
+    RAND DEF
+    LD (0x10006C), DEF
+    LD GHIJ, 0
+    RAND GHIJ
+    LD (0x100070), GHIJ
+    LD GHIJ, 0xFFFFFFFF
+    RAND GHIJ
+    LD (0x100074), GHIJ
+    LD GHIJ, 7
+    RAND GHIJ
+    LD (0x100078), GHIJ
+    LD GHIJ, 1
+    RAND GHIJ
+    LD (0x10007C), GHIJ
+    RAND A, 7
+    LD (0x100080), A
+    RAND A, 0
+    LD (0x100084), A
+    RAND BC, 50000
+    LD (0x100088), BC
+    RAND DEF, 0xFFFFFF
+    LD (0x10008C), DEF
+    RAND GHIJ, 0xFFFFFFFF
+    LD (0x100090), GHIJ
+    RAND GHIJ, 100
+    LD (0x100094), GHIJ
+    RAND GHIJ, 0
+    LD (0x100098), GHIJ
+    RAND F2
+    LD (0x10009C), F2
+    LD A, 0
+    RAND A
+    LD (0x1000A0), A
+    LD A, 10
+    RAND A
+    LD (0x1000A4), A
+    LD BC, 0
+    RAND BC
+    LD (0x1000A8), BC
+    LD BC, 1000
+    RAND BC
+    LD (0x1000AC), BC
+    LD DEF, 0
+    RAND DEF
+    LD (0x1000B0), DEF
+    LD DEF, 70000
+    RAND DEF
+    LD (0x1000B4), DEF
+    LD GHIJ, 0
+    RAND GHIJ
+    LD (0x1000B8), GHIJ
+    LD GHIJ, 0xFFFFFFFF
+    RAND GHIJ
+    LD (0x1000BC), GHIJ
+    LD GHIJ, 7
+    RAND GHIJ
+    LD (0x1000C0), GHIJ
+    LD GHIJ, 1
+    RAND GHIJ
+    LD (0x1000C4), GHIJ
+    RAND A, 7
+    LD (0x1000C8), A
+    RAND A, 0
+    LD (0x1000CC), A
+    RAND BC, 50000
+    LD (0x1000D0), BC
+    RAND DEF, 0xFFFFFF
+    LD (0x1000D4), DEF
+    RAND GHIJ, 0xFFFFFFFF
+    LD (0x1000D8), GHIJ
+    RAND GHIJ, 100
+    LD (0x1000DC), GHIJ
+    RAND GHIJ, 0
+    LD (0x1000E0), GHIJ
+    RAND F2
+    LD (0x1000E4), F2
+    LD A, 0
+    RAND A
+    LD (0x1000E8), A
+    LD A, 10
+    RAND A
+    LD (0x1000EC), A
+    LD BC, 0
+    RAND BC
+    LD (0x1000F0), BC
+    LD BC, 1000
+    RAND BC
+    LD (0x1000F4), BC
+    LD DEF, 0
+    RAND DEF
+    LD (0x1000F8), DEF
+    LD DEF, 70000
+    RAND DEF
+    LD (0x1000FC), DEF
+    LD GHIJ, 0
+    RAND GHIJ
+    LD (0x100100), GHIJ
+    LD GHIJ, 0xFFFFFFFF
+    RAND GHIJ
+    LD (0x100104), GHIJ
+    LD GHIJ, 7
+    RAND GHIJ
+    LD (0x100108), GHIJ
+    LD GHIJ, 1
+    RAND GHIJ
+    LD (0x10010C), GHIJ
+    RAND A, 7
+    LD (0x100110), A
+    RAND A, 0
+    LD (0x100114), A
+    RAND BC, 50000
+    LD (0x100118), BC
+    RAND DEF, 0xFFFFFF
+    LD (0x10011C), DEF
+    RAND GHIJ, 0xFFFFFFFF
+    LD (0x100120), GHIJ
+    RAND GHIJ, 100
+    LD (0x100124), GHIJ
+    RAND GHIJ, 0
+    LD (0x100128), GHIJ
+    RAND F2
+    LD (0x10012C), F2
+    RAND F3, -7
+    LD (0x100130), F3
+    RAND A
+    LD (0x100134), A
+    LD KLMN, 0x80000000
+    RAND F4, KLMN
+    LD (0x100138), F4
+    RAND GHIJ
+    LD (0x10013C), GHIJ
+    WAIT 3
+    WAIT 0
+    BREAK

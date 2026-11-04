@@ -1,0 +1,10 @@
+mx = MOUSE X
+my = MOUSE Y
+b = MOUSE BUTTON 1
+c = MOUSE BUTTON (b + 1)
+IF MOUSE BUTTON 0 THEN
+  PRINT "click"
+END IF
+x = 5
+y = 6
+PRINT MOUSE X

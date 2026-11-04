@@ -1,0 +1,7 @@
+x = -1
+GOTO Main
+LET x = g# NOR 31
+PRINT AT foo((PEEK(INSTR(255, PEEK32(VARPTR(X)))))) NOR RND() OR NOT VARPTR(f#) <= (foo(-TICKS, Y, (VARPTR(Y))) NAND (LEN(t$, SIN(arr, "a b", arr)) \ NOT LEFT$())) + PEEK24((0.25)) < MOUSE X AND "" AND t$ NAND (VARPTR(n) SHL VARPTR(f#) < (CHR$(NOT "hi", PEEK24(RND())))), (t$) MOD (PEEK32("hi")) IMPLY -10 IMPLY PEEK((SIN())) + (VARPTR(x) ROR (PEEK16(POW(UCASE(1e3, UCASE((Y[""])), 10))))) XOR 31 * PEEK24(FIX()) AND (-1 / 255 / foo(VARPTR(n)) * CEIL((ROUND())) ROL (5) <= 1.5 / s$); f# ROR (i) * INKEY $ ROR RIGHT(-1) ^ NOT MOUSE X - MOUSE BUTTON b XOR (b[-2.5] ROR UCASE((x["a b"]), PEEK24(RIGHT()))) ROR (NOT (-1) / NOT CHR$(t$) AND -MOUSE X MOD TAN(0))
+INPUT YIF
+INPUT a
+PRINT NOT 1 ROR (RTRIM() NAND "hi") > (-1) ROL PI XNOR b[NOT f#] ROL NOT ATAN((INT((LTRIM()), -7) < -(RIGHT$(5, 5, -1) / --7)), INSTR(-(t$ SHR 1), VARPTR(X) / 1e3)); x / (MOUSE Y); NOT x AND -1 NAND -(i) \ MOUSE BUTTON LCASE() MOD Y NOR VARPTR(t$) * 3.0 ROR MAX(i) = VARPTR(y)

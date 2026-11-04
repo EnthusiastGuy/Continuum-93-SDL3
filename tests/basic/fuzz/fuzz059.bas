@@ -1,0 +1,16 @@
+IF "x\ny" THEN
+  DIM x(NOT 255, -2.5 SHL "hi" IMPLY (65535) MOD VARPTR(x) XNOR arr = 0.25)
+  FONT TIME
+  LET X = LCASE(NOT (CHR$(a[PEEK16(foo((a), E, (0)))], t$[31]) <> MOUSE BUTTON CHR(s$, LEN((-2.5))))) NOR (255 XOR -7) * (NOT 2 / NOT MOUSE BUTTON INKEY > CEIL(a[i], i[VARPTR(y)], g#) MOD LCASE(5, s$, PEEK24(PEEK24(MOUSE X))) <= INKEY $ < -a = VARPTR(x))
+ELSEIF PEEK32(5 ROR NOT CHR() ROL 1 SHL (0) + --255 XOR VARPTR(a)) THEN
+  PRINT (RIGHT((TAN(PEEK24(NOT f#), i))) IMPLY s$ NAND NOT "x\ny" >= x) - (1.5 > s$ < 10 OR g#[255]) < X XOR ((65535) NAND (VARPTR(b)) SHR --1e3 < LEN(MID(), CHR(-VARPTR(g#), 65535, -7), "")), INKEY ROL (PEEK16(RIGHT(-VARPTR(y)))) g# + E XOR (PEEK32(n) SHL FIX((f#), PEEK24(a)) <> -7) MOD 65535 <= -7 ROR 0.25 AND -X <= RND(2, NOT (PEEK32(Y)))
+  x = FLOOR((TIME))
+  DATA "hi" >= 1.5
+ELSEIF -1 THEN
+  PRINT AT a, NOT (VARPTR(s$) = -7 - "" SHR (CHR$(-2.5, 31, PEEK(INT(5))))) SHL (SIN(VARPTR(a), RND())); (E XNOR "hi") XNOR i
+  ( VIDEO TICKS
+ELSE
+  Main:
+  SPRITE FIX(ASC(31 / -1 >= a <= "hi", -1 * VARPTR(Y) OR arr XNOR 0, (NOT CEIL(-MOUSE Y) <> LTRIM(INT(NOT x, (32))) OR PEEK32(INKEY $) NOR VARPTR(y)))), 65535, 2 MOD 255 ROL CHR$(), PEEK24(E NOR -7), VARPTR(t$) SHR -PEEK(i >= TIME) / i
+  EXIT FOR
+END IF

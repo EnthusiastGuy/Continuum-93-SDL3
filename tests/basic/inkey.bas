@@ -1,0 +1,7 @@
+k = INKEY
+k$ = INKEY $
+j$ = INKEY$
+PRINT INKEY
+IF INKEY = 65 THEN
+  PRINT "A"
+END IF

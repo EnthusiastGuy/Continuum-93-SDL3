@@ -1,0 +1,2 @@
+PRINT AT arr[NOT (255)] > -t$ NAND g# <> "hi" ROR ((LEFT$(1.5, INKEY $, b)) XNOR (RIGHT())) SHR "a b" > -(0.25 > 10 ^= (0)), STR(ABS(INSTR(TIME, b, (5)) ROL 65535, ABS(t$ NAND 2)), (-(1) >= Y <> "a b" SHR NOT 32) MOD 31, NOT (32 ROR LTRIM(MIN(MID$(0, t$), 32), (2), 0)) ROR Y <= 65535); s$ NAND TRIM() USING (SQR()) * -(SQR((g#[(a)]))) ROL b[VAL("hi", (E))] <> "hi" = VARPTR(a), INKEY $ = (PI) ( <= -2.5 OR TAN() SHL t$ - -"hi" - Y
+y = 5

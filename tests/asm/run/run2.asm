@@ -1,0 +1,4 @@
+#ORG 0x1000
+    NOP
+#ORG 0x2000
+    NOP

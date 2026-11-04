@@ -1,0 +1,10 @@
+; steps: 100
+#ORG 0x080000
+    LD A, 0x02
+    LD BCDE, 5
+    LD FGH, .P
+    LD IJK, 0x200000
+    INT 0x05, A
+    BREAK
+.P
+    #DB 0x5A, 0x31, 0x32, 0x00

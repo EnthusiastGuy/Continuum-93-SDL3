@@ -1,0 +1,16 @@
+POKE32 32, (STR$("", -(MID$()) MOD VARPTR(arr) XNOR 32 MOD NOT PEEK(RND(COS(), "x\ny", VARPTR(Y))) - PEEK24(INSTR(1.5, VARPTR(n)))))
+MEMCOPY MOUSE X, 1.5 AND STR(0.25 XOR VARPTR(s$), NOT (b) IMPLY VARPTR(a), (ABS(NOT 32))) * (VARPTR(a) SHL (MAX()) AND INSTR(NOT VARPTR(s$))), ((SGN(ASC(2, 32, VARPTR(b)), x) IMPLY (PI XNOR PEEK24(32))) SHR "hi" ROL INSTR((n) * 1e3, NOT PEEK(5), -VARPTR(x) <= n) \ STR$())
+MEMFILL NOT INKEY $ * arr SHR arr > Y[n] \ 10, COS(), NOT (y[POW((1), (VARPTR(a)), s$[PEEK(f#)])] XOR 31 IMPLY 255 > i) ROL X > PEEK24(MAX()) NOR VARPTR(Y)
+REPEAT
+  PLOT (10), 1
+  END
+UNTIL NOT ((PEEK32(VARPTR(Y) NOR y / g#)) SHL (MOUSE Y ^ g#) > (VARPTR(arr) / s$) NOR "x\ny" \ 65535 <> NOT CHR() >= -(-7))
+INPUT "p"; t$
+FOR k = (0) TO (1e3 <> (ABS(b, STRING(f#, (VARPTR(s$)), ROUND(-MID(3.0, "", MOUSE X))))) SHR LTRIM(-2.5, EXP(PEEK16(-VARPTR(b)), (32)), STRING(arr, n))) IMPLY 3.0 >= -1
+  INPUT "p"; i
+  s$ = INSTR(NOT 10, "")
+NEXT
+PLOT NOT -1 * VARPTR(y) / 1 >= 0 ROL arr + (65535) ROR RIGHT(--1, PEEK(UCASE(255, 31, (INKEY $))), a) < y OR 0.25, (-32 NAND -5 SHR y) > y / -10 NOR (n[(ABS())]) SHR MOUSE X / 1 + 1.5
+FONT MAXWIDTH -7
+PLOT (s$), NOT UCASE(1 AND PEEK24((i)) ^ NOT foo(), VAL(NOT FLOOR((MOUSE BUTTON 65535), (-7), b) IMPLY 3.0, (255), NOT PEEK24(f#[0])), -1) IMPLY VARPTR(t$)
+n = a
