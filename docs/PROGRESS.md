@@ -2,14 +2,26 @@
 
 Read this first in every session. Update it at the end of every work block.
 
-**Current phase:** 9 — Speed pass, packaging (phases 1–8 done; audio plays the boot sound and PLAY)
-**Next action:** phase 9 packaging: release builds on Linux and macOS (`build.sh`; WSL Ubuntu here has GCC 15
-but no cmake/ninja and no sudo), then the Raspberry Pi. The speed pass is done (D-29; 1 G instr/s not reached,
-see PLAN.md → Benchmarks). D-24 (resume on F1 exit?) waits on the user.
+**Current phase:** 9 — packaging (phases 1–8 done; speed pass done, D-29)
+**Next action:** release builds on Linux and macOS (`build.sh`; WSL Ubuntu here has GCC 15 but no
+cmake/ninja; installing them needs the user's sudo), then the Raspberry Pi. The non-Windows window icon
+(`SDL_SetWindowIcon` from the compiled-in `icon/window.png`) has not been compiled yet: check it there.
+Work lives on branch `feature/sdl3-port`.
+
+### 2026-11-04 — the user's decisions applied
+D-24 (F1 exit resumes), D-17 (benchmark MHz = i486-class equivalent clock, ~800 MHz here), D-9 (unencodable
+lines are assembler errors; 4 shipped programs fixed), D-18 (BASIC emits working code; string runtime
+rewritten), D-30 (3D software path stays approximate). App icon: `icon/` (master, .ico resource, window PNG).
+Verified after the merges: vectors 1072/1072 (0 of 103,487 wrong); programs 44/44; asm 132 ok + 5 D-9
+(oracle regenerated from the fixed Data); basic 228 ok + 113 D-18; basicrun 7/7; cc 541; disasm 27,148;
+watch 32,476; immediate 65 ok + 14 D-9 + 5 reference-threw; xsound 137 (0 samples differ); ldfill, input ok.
+Live: F1 in/out during the boot countdown, Halcyon boots; benchmark 794–802 MHz over 3 runs; exe icon shown.
 
 Tests: `tests\conf.cmd` (instructions), `tests\programs.cmd` (whole programs, regenerates the
 reference results), `tests\png2font.cmd` (CLI font converter vs the reference's), `build\release\conformance.exe --input | --ldfill | --bench ["<watch condition>"|--tracked]`,
-`--disasm|--asm|--basic|--cc build\<x>.txt`, `--watch build\watch.txt`, `--immediate build\immediate.txt`.
+`--disasm|--asm|--basic|--cc build\<x>.txt`, `--basicrun tests\basicrun`, `--watch build\watch.txt`, `--immediate build\immediate.txt`.
+After changing Data/ sources, regenerate the asm oracle: `tests\oracle\bin\Release\net8.0\oracle.exe --asm
+<repo>\Data <repo>\tests\asm <repo>\tests\programs build\asm.txt`.
 
 Test one family: `tests\conf.cmd AND OR` (all: no arguments). Core-only build without SDL:
 `cmake -DC93_APP=OFF` (target `conformance`).
@@ -46,7 +58,7 @@ match. No device: `Audio: no output device (...); running silent`. No guest prog
 - [x] 7 Settings, fullscreen, gamepad, cursor, command line (`-help`, `-png2font`; D-28)
 - [x] 8 Service mode — wave 1 (framework, Emulator/Disassembler/Registers/Flags/Status, debugger) and
       wave 2 (every remaining window and popup, `docs/SERVICE.md`); D-23..D-27
-- [ ] 9 Speed pass (done, D-29), packaging on 3 OSes
+- [ ] 9 Speed pass (done, D-29), app icon (done), packaging on 3 OSes (Windows done; Linux, macOS, Pi open)
 
 ### Phase 2 — instruction families (C# file → status)
 
@@ -115,7 +127,7 @@ INT (phase 3), RAND/WAIT/PLAY (host-dependent; G ports RAND/WAIT, PLAY is phase 
 - Phase 4 merged: `asm.h/.cpp` + generated `asm_ops.inc` (oracle `--optable`), oracle `--asm`,
   `conformance --asm`, corpus `tests/asm`. 129/129 files byte-identical (Data incl. q.asm, all test
   programs, C-compiler output of boot.c/halcyon.c/neon-ricochet.c, 36 edge-case files, every one of
-  the 1212 variants). D-9 corrected (opcode byte only), still the user's call.
+  the 1212 variants). D-9 corrected (opcode byte only), since made an error by the user (D-9).
 - Boot wired: `assembleInto()` (ints.cpp) loads a source into RAM; main.cpp boots `bootProgram`
   (C sources fall back to q.asm until phase 5) on the CPU thread; INT 0 0xC0 Build is real.
 - **Verified live:** Q OS boots (3 ms assemble), keyboard navigation works, `bubble-universe.asm`
@@ -165,8 +177,8 @@ INT (phase 3), RAND/WAIT/PLAY (host-dependent; G ports RAND/WAIT, PLAY is phase 
   mode; guest mouse = Emulator-view mapping (239,135) on both; software renderer within ±5 per channel.
   conf ADD 0 wrong, `--input` ok, `--bench` ~422 M instr/s (base build ~421).
 - Service mode wave 1 merged (`src/service/*`, `docs/SERVICE.md`, oracle `--disasm`): pixel-identical to
-  the reference at 1440x810; disasm 27,148/27,148; bench unchanged (424 M). D-23..D-25 (D-24 open: should
-  leaving service mode with F1 resume the CPU? The reference keeps it stopped).
+  the reference at 1440x810; disasm 27,148/27,148; bench unchanged (424 M). D-23..D-25 (D-24 since decided: F1 exit resumes;
+  the reference kept it stopped).
 - Service mode wave 2 in flight, 4 agents in scratch copies portN (memory + memory map, tracking armed
   only in service mode), portO (stacks, float regs, palettes, 3D view), portP (watcher, immediate),
   portQ (disassembler/register/history popups + instruction docs). UI checks serialised via

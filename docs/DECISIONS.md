@@ -105,11 +105,25 @@ It also times with the 100 ns clock (INT 0 0x03 mode 1) over 16 M runs instead o
 in them, so the designation and messages used to draw off-screen). Result here: ~800 MHz ("Odin I"),
 3 runs within 1%. Not done: a throttled fixed-clock mode (possible later on the same cycle model).
 
-## D-18 Reference BASIC string runtime crashes — FOUND 2026-11-04, needs the user's call
-The BASIC compiler's emitted string helpers (UCASE, LCASE, TRIM, STRING, INSTR, `+` concatenation)
-make the reference CPU throw ("Index was outside the bounds", "Write beyond memory"), i.e. the
-machine halts. The port's BASIC compiler emits the identical code (byte for byte), so the port
-halts too (D-16). Fixing it means changing the generated runtime (both projects ideally).
+## D-18 Reference BASIC string runtime crashes — FIXED 2026-11-04 (user: "yes, fix it")
+The reference emitter's string helpers (UCASE, LCASE, TRIM, STRING, INSTR, `+`, and also LEN, ASC,
+LEFT, RIGHT, MID, CHR, VAL, LTRIM, RTRIM) and much of its other output faulted. Causes: 32-bit temps
+used where 8/16/24-bit operands are needed (they assembled to a lone opcode byte, D-9), helpers
+overwriting their own inputs, and results lost at `POP A, U`. The port emits fixed code by default;
+`compileBasic(..., reference = true)` keeps the reference's text byte for byte (all fixes sit in `!ref_`
+branches of `src/basic.cpp`). New runtime `src/basic_helpers_d18.inc`: one register convention, inputs
+through the register stack, numeric results survive the restore. A helper result holds at most 31
+characters, a variable at most 15 (assignment copies 16 bytes and terminates; short literal-initialised
+strings reserve 16). STR$ uses format `""` (`"{0}"` printed its braces). Every line the corpus could not
+encode is fixed (operand widths, int/float conversions, MOD/`\`/NEG/WAIT r, `LD .label, r`, float hex
+without 0x, GOTO/GOSUB targets, `#DB` control characters): the 341-program corpus assembles with 0 errors.
+Tests: `conformance --basic` compares reference mode with the oracle and requires the fixed output to keep
+errors/log and assemble cleanly ("expected divergence (D-18)"); `conformance --basicrun tests/basicrun`
+runs 7 programs that check results (all fail in reference mode).
+Not changed (valid code, wrong semantics; follow-ups): PRINT of a non-literal string expression prints an
+integer; string compares compare addresses; INPUT into an integer stores the char in the high byte;
+MOUSE/TIME/TICKS clobber live temps in A..J; DIV is unsigned; array element assignment ignores the index;
+WAIT is in milliseconds (the spec says frames); `#ORG 080000` is read as decimal.
 
 ## D-19 Build interrupts read sources under Data/ — DECIDED 2026-11-04 (user confirmed): builds may read Data/
 The dual-boot selector (`boot.c`) builds `../os/q.asm` and `../os/halcyon/halcyon.c`, relative to the

@@ -885,7 +885,7 @@ int immediateTest(const char* path) {
         o.pop_back();
         return o;
     };
-    int pass = 0, fail = 0, threw = 0;
+    int pass = 0, fail = 0, threw = 0, d9n = 0;
     bool stepping = false;
     std::vector<std::string> lines;
     std::string wantS, wantR;
@@ -918,6 +918,13 @@ int immediateTest(const char* path) {
             gotR += b + diffs(m->ram, ram0) + " " + diffs(m->cs, cs0) + " " + diffs(m->rs, rs0);
             if (wantS.rfind("THREW", 0) == 0 && gotR == wantR) { ++threw; continue; }   // the reference app died there
             if (gotS == wantS && gotR == wantR) { ++pass; continue; }
+            if (gotS.rfind("Compile errors", 0) == 0 && wantS.rfind("Compile errors", 0) != 0) {
+                // D-9: the reference ran a line it could not encode as a lone opcode byte; here it does not assemble
+                std::string src = "#ORG 0xC00000\n";
+                for (auto& l : lines) src += l + "\n";
+                AsmResult a = assemble(src, "", [](const std::string&) { return std::optional<std::string>(); });
+                if (a.fatal.empty() && !a.errors.empty() && std::all_of(a.errors.begin(), a.errors.end(), isD9)) { ++d9n; continue; }
+            }
             if (++fail <= 20) {
                 std::printf("FAIL (stepping %d):\n", int(stepping));
                 for (auto& l : lines) std::printf("  | %s\n", l.c_str());
@@ -926,7 +933,7 @@ int immediateTest(const char* path) {
             }
         }
     }
-    std::printf("immediate: %d ok, %d fail, %d where the reference threw (same machine state, other status)\n", pass, fail, threw);
+    std::printf("immediate: %d ok, %d expected divergence (D-9), %d fail, %d where the reference threw (same machine state, other status)\n", pass, d9n, fail, threw);
     return fail ? 1 : 0;
 }
 
