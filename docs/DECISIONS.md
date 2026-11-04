@@ -89,12 +89,18 @@ An exception escaping the C# CPU loop stopped the machine; the port stops it too
 reason) for file-system errors, invalid formats, chars > 255 in the key buffer, etc. Cases are
 kept in `tests/throw/` (the oracle confirms each one throws).
 
-## D-17 What "CPU MHz" means — DEFERRED by the user (2026-11-04), revisit after the port
-The reference's cycle table (`Tools/InstructionCycleBenchmark`) was calibrated on the C# emulator
-itself (fastest instruction = 2 ticks, others scaled by measured speed), so the benchmark's MHz is
-self-referential and scale-arbitrary. The port shows 2522 "MHz" (≈360 M emulated instr/s) vs the
-reference's 729. Options discussed: report MIPS on a stated mix; freeze the current tick table as
-the ISA cycle spec ("Continuum MHz"); optional fixed-clock (throttled) mode. Nothing changed yet.
+## D-17 "CPU MHz" is a real-hardware-equivalent clock — DECIDED 2026-11-04 (user: "as close to actual hardware MHz as possible")
+The reference's cycle counts (`Tools/InstructionCycleBenchmark`) were calibrated on the C# emulator
+itself (fastest instruction = 2 ticks), so its "MHz" was self-referential (the port showed ~3800).
+The MHz is computed only by the guest's CPU benchmark (cycles per loop x runs / time); no emulator
+code involves cycles. The benchmark now counts the cycles real hardware would take: an in-order,
+single-issue pipelined CPU with on-chip cache, the i486 class (1993, the machine's era): register
+ALU/move 1 cycle, taken branch 3 (not taken 1), +1 per memory access. Its LD/DEC/CP/JR loop is
+6 cycles (was 28). The figure is the clock such a chip would need to keep up with the emulator.
+It also times with the 100 ns clock (INT 0 0x03 mode 1) over 16 M runs instead of 1 ms over 10 M
+(the loop now ends in ~0.12 s), and reloads DrawText's registers per line (DrawText returns its box
+in them, so the designation and messages used to draw off-screen). Result here: ~800 MHz ("Odin I"),
+3 runs within 1%. Not done: a throttled fixed-clock mode (possible later on the same cycle model).
 
 ## D-18 Reference BASIC string runtime crashes — FOUND 2026-11-04, needs the user's call
 The BASIC compiler's emitted string helpers (UCASE, LCASE, TRIM, STRING, INSTR, `+` concatenation)
@@ -147,11 +153,15 @@ The reference stopped registering key downs while service mode was open (and cle
 but its TextInput handler still put typed characters into the guest's buffer and fired the keyboard
 callback. The port blocks both; key releases still go through so nothing sticks.
 
-## D-24 Leaving service mode with F1 leaves the CPU stopped — OPEN (user's call)
-Verified on the running reference: F1 always turns step-by-step on, and leaving with F1 does not turn it
-off, so the machine stays frozen (title ", debugging") until the user re-enters and presses F8 (continue)
-or F5. The port reproduces it. Option: resume on F1 exit (`ops::ContinueExecution()` in the exit branch of
-service.cpp's F1 handling, one line). Proposal: resume on exit; it is what a user expects.
+## D-24 Leaving service mode with F1 resumes the machine — DECIDED 2026-11-04 (user)
+The reference turned step-by-step on with F1 and never off on leaving, so the machine stayed frozen
+(title ", debugging") until the user re-entered and pressed F8 or F5. The port now calls
+`ops::ContinueExecution()` when F1 leaves service mode (log: "service mode off; CPU resumed at ...").
+Verified live: F1 during the boot selector's countdown, F1 again, the countdown finishes and Halcyon boots.
+
+## D-30 3D view on the CPU renderer stays approximate — DECIDED 2026-11-04 (user)
+Without a GPU, ~1.9% of the 3D view's pixels differ from the GPU path (SDL's software triangle
+rasterizer). The user accepted it; a custom exact rasterizer is not worth it for now.
 
 ## D-25 Service-mode quirks kept — NOTE (2026-11-04)
 - Windows whose content area is smaller than the 8 px clip inset (STATUS, height 30) get a negative

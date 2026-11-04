@@ -77,8 +77,19 @@ add_executable(continuum WIN32
   src/ints_text.cpp
   src/ints_video.cpp
   src/video.cpp)
-target_include_directories(continuum PRIVATE src)
+target_include_directories(continuum PRIVATE src ${CMAKE_BINARY_DIR}/gen)
 target_link_libraries(continuum PRIVATE SDL3::SDL3-static ogg opus)
+
+# App icon: Windows embeds icon/continuum.ico as a resource; elsewhere the window gets
+# icon/window.png, compiled in as a byte array (no file to ship or lose).
+if(WIN32)
+  target_sources(continuum PRIVATE src/continuum.rc)
+else()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/icon/window.png)
+  file(READ ${CMAKE_SOURCE_DIR}/icon/window.png C93_ICON_HEX HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," C93_ICON_BYTES "${C93_ICON_HEX}")
+  file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/gen/icon_png.inc CONTENT "${C93_ICON_BYTES}\n" @ONLY)
+endif()
 target_compile_definitions(continuum PRIVATE C93_VERSION="${PROJECT_VERSION}" C93_AUDIO_OUT=1)
 
 if(MSVC)

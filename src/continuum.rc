@@ -1,0 +1,3 @@
+// Windows resources. The first icon is the exe's icon in Explorer, and SDL uses it for the
+// window and taskbar too (it registers its window class with the exe's first icon group).
+1 ICON "../icon/continuum.ico"

@@ -297,6 +297,7 @@ void update() {
     // --- ServiceInput.Update ---
     bool was = S->serviceMode;
     if (S->pressed[kF1]) {
+        if (was) ops::ContinueExecution();   // D-24: leaving resumes the machine (the reference left it paused)
         S->serviceMode = !S->serviceMode;
         if (!was && S->serviceMode) {
             {   // KeyboardStateExt.ClearState: the program sees no keys held while the service UI is open
@@ -315,7 +316,7 @@ void update() {
             m.trackActivity(false);  // ActivityTracker.Enabled = false; Clear
             m.clearActivity();
             if (S->hasPre && S->preW > 0 && S->preH > 0) setClientSize(S->preW, S->preH);   // RestorePreServiceSize
-            LOGI("Service: service mode off%s", m.stepByStep.load() ? "; the CPU stays in step-by-step" : "");
+            LOGI("Service: service mode off; CPU resumed at 0x%06X", unsigned(ops::ip()));
         }
     }
     if (S->serviceMode) {

@@ -22,40 +22,44 @@
 
 
 
-	; Record the time at the start of the benchmark
+	; Record the time at the start of the benchmark (100 ns ticks)
 	LD A, 0x03
-	LD B, 0x00
+	LD B, 0x01
 	LD CDE, .StartTime
 	INT 0x00, A
-	
-	; Run the benchmark 10 million times for accuracy
-	LD XYZ, 10000000
+
+	; Run the benchmark 16 million times for accuracy
+	LD XYZ, 16000000
 
 ; We create a simple benchmark that runs some simple instructions
-; for which we know what the assigned CPU cycles are, resulting
-; in a completely measurable execution cycles total. The benchmark
-; below takes 28 CPU cycles per run
+; for which we know what the CPU cycles are, resulting in a
+; completely measurable execution cycles total. Cycles are those of
+; real hardware: an in-order, single-issue pipelined CPU with an
+; on-chip cache, the i486 class of 1993 (register ops 1 cycle, a taken
+; branch 3). The MHz shown is the clock such a chip would need to
+; match this machine. The loop below takes 6 cycles per run
 .BenchLoop
-	LD XYZ, XYZ			; 6 cycles
-	DEC XYZ				; 6 cycles
-	CP XYZ, 0			; 8 cycles
-	JR GT, .BenchLoop	; 8 cycles
+	LD XYZ, XYZ			; 1 cycle
+	DEC XYZ				; 1 cycle
+	CP XYZ, 0			; 1 cycle
+	JR GT, .BenchLoop	; 3 cycles (taken)
 	
 	; Record the time at the end of the benchmark
 	LD A, 0x03
-	LD B, 0x00
+	LD B, 0x01
 	LD CDE, .EndTime
 	INT 0x00, A
-	
-	LD ABCD, (.EndTime)
-	LD EFGH, (.StartTime)
-	
-	LD F0, 280000000.0
+
+	; Elapsed ticks: the low 32 bits are enough (they wrap after 7 minutes)
+	LD ABCD, (.EndTimeLow)
+	LD EFGH, (.StartTimeLow)
+
+	; MHz = cycles / (ticks x 100 ns) / 1 000 000 = cycles x 10 / ticks
+	LD F0, 960000000.0	; 6 cycles x 16 million runs x 10
 
 	SUB ABCD, EFGH
 
 	DIV F0, ABCD
-	DIV F0, 1000.0
 	
 	; Convert to string
 	LD A, 0x01
@@ -82,17 +86,21 @@
 	LD DEF, .CPUDesignation
 	INT 0x00, A
 
+	; DrawText returns the text's box in its parameter registers, so reload them for every line
 	LDREGS A, R, (.DrawTextDrawParams)
 	INT 0x01, A
 
-	ADD JK, 16
+	LDREGS A, R, (.DrawTextDrawParams)
+	LD JK, 116
 	LD EFG, .CPUDesignation
 	INT 0x01, A
 
+	LDREGS A, R, (.DrawTextDrawParams)
 	LD JK, 10
 	LD EFG, .DoneMessage
 	INT 0x01, A
 
+	LDREGS A, R, (.DrawTextDrawParams)
 	LD JK, 250
 	LD EFG, .ExitMessage
 	INT 0x01, A
@@ -116,13 +124,13 @@
 	RET
 	
 .WaitMessage
-	#DB "Please wait up to a few minutes", 0
+	#DB "Please wait a moment", 0
 
 .DoneMessage
 	#DB "Benchmark done", 0
 
 .NumberFormat
-	#DB "'CPU Frequency:' 0.00 'Mhz'", 0
+	#DB "'CPU Frequency:' 0.00 'MHz'", 0
 
 .TextString
 	#DB [40] 0
@@ -139,8 +147,12 @@
 	
 .StartTime
 	#DB 0x00000000
-	
+.StartTimeLow
+	#DB 0x00000000
+
 .EndTime
+	#DB 0x00000000
+.EndTimeLow
 	#DB 0x00000000
 	
 .OffsetTime

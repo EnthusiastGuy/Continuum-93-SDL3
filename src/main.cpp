@@ -237,6 +237,15 @@ int main(int argc, char** argv) {
         LOGE("Continuum: no window (%s)", SDL_GetError());
         return 1;
     }
+#ifndef _WIN32   // Windows takes the multi-size icon from the exe's resources (continuum.rc)
+    static const uint8_t kIconPng[] = {
+#include "icon_png.inc"
+    };
+    if (SDL_Surface* icon = SDL_LoadPNG_IO(SDL_IOFromConstMem(kIconPng, sizeof kIconPng), true)) {
+        SDL_SetWindowIcon(window, icon);
+        SDL_DestroySurface(icon);
+    }
+#endif
 
     audioInit();
     audioPlayInitializationSounds();   // Computer(initWithAudio: true) beeps before the boot program loads
