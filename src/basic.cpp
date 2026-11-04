@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <optional>
@@ -819,12 +820,8 @@ private:
         if (!ok || i != v.size())
             throw Thrown("Failed to parse float from token '" + tk.value + "' (Type: FLOAT) at line " + std::to_string(tk.line) +
                          ": The input string '" + tk.value + "' was not in a correct format.");
-        float f = 0;
-        auto r = std::from_chars(v.data() + (v[0] == '-'), v.data() + v.size(), f);
-        if (r.ec == std::errc::result_out_of_range) {   // from_chars reports range errors; .NET rounds to inf/0
-            double dd = std::strtod(std::string(v.substr(v[0] == '-')).c_str(), nullptr);
-            f = float(dd);
-        }
+        // strtof, not from_chars: Apple's libc++ has no float from_chars. Out of range rounds to inf/0, as .NET does.
+        float f = std::strtof(std::string(v.substr(v[0] == '-')).c_str(), nullptr);
         return v[0] == '-' ? -f : f;
     }
 };

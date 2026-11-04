@@ -5,6 +5,9 @@ cmake_minimum_required(VERSION 3.24)
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+# macOS 13.3: the first with float std::to_chars; without this the SDK's own version is the minimum.
+set(CMAKE_OSX_DEPLOYMENT_TARGET 13.3 CACHE STRING "Minimum macOS version")
+
 project(Continuum93 VERSION 3.0.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

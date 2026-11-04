@@ -309,3 +309,10 @@ Measured on the running reference and settled to its usual outcome, deterministi
 - `package-macos.sh` runs on a Mac (native arch; universal binary not tried: unverifiable here).
 - Site: the machine in an iframe (SDL fill-document owns its document); headers by `.htaccess`/`_headers`, with
   our own small service worker (`coi-sw.js`) as the fallback rather than the third-party coi-serviceworker.
+
+## D-37 macOS: strtof for float literals, macOS 13.3 minimum — DECIDED 2026-11-04 (user: publish a Mac zip)
+- Apple's libc++ has no float `std::from_chars`; the assembler and BASIC parse float literals with strtof instead
+  (on every OS, one path). Both inputs are checked as plain decimal first, so strtof's hex/inf spellings never apply.
+  Correctly rounded like from_chars; out of range gives inf/0 as .NET does. The old double-then-float fallback is gone.
+- `CMAKE_OSX_DEPLOYMENT_TARGET 13.3`: the first macOS with float `std::to_chars`, which the .NET-style float
+  formatting needs. Older Macs are not supported.

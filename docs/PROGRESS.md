@@ -3,10 +3,20 @@
 Read this first in every session. Update it at the end of every work block.
 
 **Current phase:** 9 — packaging (phases 1–8 done; speed pass done, D-29)
-**Next action:** macOS: run `./package-macos.sh` on a Mac (or a GitHub Actions macOS runner) and fix what
-breaks; then run the linux-arm64 zip on a real Raspberry Pi (64-bit OS). The user uploads `dist/web/`. Optional web follow-ups are in
-docs/WEB.md (IDBFS saves, coi-serviceworker for GitHub Pages). Work lives on branch `feature/platforms`
-(from `main`).
+**Next action:** re-run the asm and BASIC suites on Windows (`conformance --asm`, `--basic`): float literals
+now parse with strtof (D-37); expect 129/129 and 341/341. Then run the linux-arm64 zip on a real Raspberry Pi
+(64-bit OS). The user publishes `dist/continuum93-macos-arm64.zip` and uploads `dist/web/`. Optional web
+follow-ups are in docs/WEB.md. macOS work is on branch `feature/macos` (from `main`), not committed yet.
+
+### 2026-11-04 — macOS build and package (D-37)
+- `./package-macos.sh` on an Apple silicon MacBook Air (macOS 26.6, Apple clang 17, CMake 4.5 from the .dmg,
+  make, no Ninja) → `dist/continuum93-macos-arm64.zip`: 165 files, binary mode 755, arm64, minos 13.3, links
+  only system frameworks, no init.cfg / serviceState / zz_ files.
+- Two fixes: float `std::from_chars` (missing from Apple's libc++) → strtof in asm.cpp and basic.cpp; deployment
+  target set to 13.3 (otherwise the SDK's 15.5 is the minimum).
+- Ran: Metal renderer, CRT on, audio opened, boot.c → Halcyon, clean shutdown (log + screenshot);
+  `conformance --ldfill` 6/6; `--bench` 425/264/229/295/224 M instr/s. Not run: asm/BASIC vector suites (the
+  vectors come from the Windows oracle), x64 Macs, macOS 13–15.
 
 ### 2026-11-04 — CRT fixes and the two-column site
 - CRT (D-34 updated): corners bend instead of being cut (per-axis bend); no moiré in small windows (scanline
