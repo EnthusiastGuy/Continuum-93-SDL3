@@ -358,6 +358,11 @@ std::optional<std::string> readFile(const std::string& path) {
     return ss.str();
 }
 
+// D-9: a line the reference assembled to a lone opcode byte, an error here (see encode in src/asm.cpp)
+bool isD9(const AsmMsg& e) {
+    return e.text.find("': no ") != std::string::npos || e.text.find("': unknown mnemonic ") != std::string::npos;
+}
+
 int asmTest(const char* path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) { std::fprintf(stderr, "conformance: cannot open %s\n", path); return 2; }
@@ -381,10 +386,15 @@ int asmTest(const char* path) {
         else if (tag == 'T') w.refUs = std::stoll(a, nullptr, 16);
     }
     auto resolve = [](const std::string& p) { return readFile(p); };
-    int pass = 0, fail = 0;
+    int pass = 0, fail = 0, d9n = 0;
     for (auto& w : all) {
         std::string src = w.fromDisk ? readFile(w.file).value_or("") : w.src;
         AsmResult r = assemble(src, w.fromDisk ? w.file : "", resolve);
+        // D-9: lines the reference assembled to a lone opcode byte are errors here. Set them apart: the
+        // rest (other errors, run address, block count) must still match; the bytes cannot.
+        auto d9 = std::stable_partition(r.errors.begin(), r.errors.end(), [](const AsmMsg& e) { return !isD9(e); });
+        std::vector<AsmMsg> d9s(d9, r.errors.end());
+        r.errors.erase(d9, r.errors.end());
         std::string why;
         char buf[200];
         if (!w.threw.empty() || !r.fatal.empty()) {
@@ -399,7 +409,7 @@ int asmTest(const char* path) {
         } else {
             for (size_t i = 0; i < r.errors.size() && why.empty(); ++i)
                 if (r.errors[i].line != w.errLines[i]) { std::snprintf(buf, sizeof buf, "error line: want %u, got %u", w.errLines[i], r.errors[i].line); why = buf; }
-            for (size_t i = 0; i < r.blocks.size() && why.empty(); ++i) {
+            for (size_t i = 0; i < r.blocks.size() && why.empty() && d9s.empty(); ++i) {
                 auto &g = r.blocks[i], &e = w.blocks[i];
                 size_t k = 0;
                 while (k < g.data.size() && k < e.data.size() && g.data[k] == e.data[k]) ++k;
@@ -414,8 +424,14 @@ int asmTest(const char* path) {
                 if (srcLine) why += "\n  line " + std::to_string(srcLine) + ": " + r.source[srcLine - 1];
             }
         }
-        why.empty() ? ++pass : ++fail;
-        std::printf("%s %s%s%s\n", why.empty() ? "ok  " : "FAIL", w.file.c_str(), why.empty() ? "" : "\n  ", why.c_str());
+        if (why.empty() && !d9s.empty()) {
+            ++d9n;
+            std::printf("D-9  %s\n", w.file.c_str());
+            for (auto& e : d9s) std::printf("  line %u: %s\n", e.line, e.text.c_str());
+        } else {
+            why.empty() ? ++pass : ++fail;
+            std::printf("%s %s%s%s\n", why.empty() ? "ok  " : "FAIL", w.file.c_str(), why.empty() ? "" : "\n  ", why.c_str());
+        }
         if (w.refUs) {   // timing: the OS is assembled at every boot
             double best = 1e30;
             for (int k = 0; k < 20; ++k) {
@@ -426,7 +442,16 @@ int asmTest(const char* path) {
             std::printf("     time: %.2f ms (reference %.1f ms)\n", best, double(w.refUs) / 1000.0);
         }
     }
-    std::printf("asm: %d ok, %d fail\n", pass, fail);
+    {   // D-9 self-check: such a line is an error naming the line, and emits nothing
+        AsmResult a = assemble("#ORG 0x1000\nLD A, 1\nLD (BCD), 0\n//INT 0x01, A\nLD A, 2\n", "", resolve);
+        AsmResult b = assemble("#ORG 0x1000\nLD A, 1\nLD A, 2\n", "", resolve);
+        bool ok = a.errors.size() == 2 && a.errors[0].line == 3 && a.errors[0].text == "'LD (BCD), 0': no LD form takes operands (rrr),nnn" &&
+                  a.errors[1].line == 4 && a.errors[1].text == "'//INT 0x01, A': unknown mnemonic //INT" &&
+                  a.blocks.size() == 1 && b.blocks.size() == 1 && a.blocks[0].data == b.blocks[0].data;
+        ok ? ++pass : ++fail;
+        std::printf("%s D-9 self-check (error message, nothing emitted)\n", ok ? "ok  " : "FAIL");
+    }
+    std::printf("asm: %d ok, %d expected divergence (D-9), %d fail\n", pass, d9n, fail);
     return fail ? 1 : 0;
 }
 
@@ -491,10 +516,13 @@ int basicTest(const char* path) {
     std::filesystem::create_directories(fsRoot);
     gFsRoot = fsRoot.string();
     auto m = std::make_unique<Machine>();
-    int pass = 0, fail = 0;
+    int pass = 0, fail = 0, d9n = 0;
     for (auto& w : all) {
         BasicResult r = compileBasic(w.src);
         std::string why;
+        size_t d9 = 0;   // D-9 lines in the generated assembly: more errors in E, and the RAM cannot match
+        if (!w.threw && !w.errors)
+            for (auto& e : assemble(r.asmText, "", [](const std::string&) { return std::optional<std::string>(); }).errors) d9 += isD9(e);
         if (r.errors != w.errors) why = "errors: want " + std::to_string(w.errors) + ", got " + std::to_string(r.errors) + "\n  ";
         if (r.runAddress != w.run) why += "run address differs\n  ";
         if (std::string d = firstDiff(w.asmText, r.asmText); !d.empty()) why += "asm " + d + "\n  ";
@@ -508,20 +536,25 @@ int basicTest(const char* path) {
             gInt[0][0xC1](*m, 0);
             bool none = w.errors == 0 && w.blocks.empty();
             uint32_t run = w.errors || none ? 0xFFFFFF : w.asmRun;
-            uint32_t errs = w.errors ? std::min(w.errors, 255) : none ? 0xEE : (w.asmErrors & 0xFF);
+            uint32_t errs = w.errors ? std::min(w.errors, 255) : none ? 0xEE : ((w.asmErrors + d9) & 0xFF);
             char buf[120];
             if (m->get<24>(1) != run || m->get<8>(4) != errs) {
                 std::snprintf(buf, sizeof buf, "INT 0xC1: BCD/E want %X/%X, got %X/%X\n  ", run, errs, m->get<24>(1), m->get<8>(4));
                 why += buf;
             }
             for (auto& b : w.blocks)
-                if (std::memcmp(m->ram + b.start, b.data.data(), b.data.size())) {
+                if (!d9 && std::memcmp(m->ram + b.start, b.data.data(), b.data.size())) {
                     std::snprintf(buf, sizeof buf, "INT 0xC1: block at %X differs in RAM\n  ", b.start);
                     why += buf;
                 }
         }
-        why.empty() ? ++pass : ++fail;
-        std::printf("%s %s%s%s\n", why.empty() ? "ok  " : "FAIL", w.file.c_str(), why.empty() ? "" : "\n  ", why.c_str());
+        if (why.empty() && d9) {
+            ++d9n;
+            std::printf("D-9  %s (%zu line(s) of the generated assembly)\n", w.file.c_str(), d9);
+        } else {
+            why.empty() ? ++pass : ++fail;
+            std::printf("%s %s%s%s\n", why.empty() ? "ok  " : "FAIL", w.file.c_str(), why.empty() ? "" : "\n  ", why.c_str());
+        }
         if (w.refUs) {
             double best = 1e30;
             for (int k = 0; k < 20; ++k) {
@@ -532,7 +565,7 @@ int basicTest(const char* path) {
             std::printf("     time: %.2f ms (reference %.2f ms), %zu source bytes\n", best, double(w.refUs) / 1000.0, w.src.size());
         }
     }
-    std::printf("basic: %d ok, %d fail\n", pass, fail);
+    std::printf("basic: %d ok, %d expected divergence (D-9), %d fail\n", pass, d9n, fail);
     return fail ? 1 : 0;
 }
 

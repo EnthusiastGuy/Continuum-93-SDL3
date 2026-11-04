@@ -22,7 +22,7 @@
                                     ; never changes, it suffices to do it once here.
 
     CALLR .InitializeClock          ; Initialize the clock time
-    LD (.zOffset), 0                ; This will be used to manage an oscilator used to sustain the main animation
+    LD (.zOffset), 0, 1             ; This will be used to manage an oscilator used to sustain the main animation
 
 
 .Repeat                             ; Main loop
