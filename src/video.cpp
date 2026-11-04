@@ -1,6 +1,7 @@
 #include "video.h"
 
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <cstring>
 
 #include "log.h"
@@ -50,7 +51,7 @@ bool Video::initGpuLayers() {
 void Video::present(Machine& m) {
     SDL_SetRenderDrawColor(r_, 0, 0, 0, 255);
     SDL_RenderClear(r_);
-    drawLayers(m);
+    drawLayers(m, crtOn_);
     SDL_RenderPresent(r_);
 }
 
@@ -74,7 +75,13 @@ void Video::setLogical(bool on) {
     SDL_SetRenderLogicalPresentation(r_, on ? kW : 0, on ? kH : 0, on ? SDL_LOGICAL_PRESENTATION_LETTERBOX : SDL_LOGICAL_PRESENTATION_DISABLED);
 }
 
-void Video::drawLayers(Machine& m) {
+void Video::setCrt(bool on) {
+    crtOn_ = on;
+    if (on) rgb_.assign(kVSize, 0);
+    LOGI("Video: CRT filter %s", on ? "on; computed on the CPU at the window's size" : "off");
+}
+
+void Video::drawLayers(Machine& m, bool crt) {
     uint8_t pages = m.vramPages.load();
     if (pages != pages_) { pages_ = pages; std::memset(palBottom_, 0, sizeof palBottom_); }
 
@@ -89,7 +96,7 @@ void Video::drawLayers(Machine& m) {
     for (int b = 0; b < pages; ++b)
         if (vis >> b & 1) order[count++] = b;
 
-    if (count) gpu_ ? presentGpu(m, order, count) : presentSoftware(m, order, count);
+    if (count) crt ? presentCrt(m, order, count) : gpu_ ? presentGpu(m, order, count) : presentSoftware(m, order, count);
 }
 
 void Video::presentGpu(Machine& m, const int* order, int count) {
@@ -122,6 +129,41 @@ void Video::presentSoftware(Machine& m, const int* order, int count) {
     int pitch;
     if (!SDL_LockTexture(frame_, nullptr, &pixels, &pitch)) return;
     m.backDirty.store(0, std::memory_order_relaxed);
+    composite(m, order, count, static_cast<uint32_t*>(pixels), pitch);
+    SDL_UnlockTexture(frame_);
+    SDL_RenderTexture(r_, frame_, nullptr, nullptr);
+}
+
+// Leaves backDirty alone: the GPU layers still need those uploads when the service view shows them.
+void Video::presentCrt(Machine& m, const int* order, int count) {
+    // The letterbox in output pixels, so the mask lands on real pixels; past ~2 Mpx (4K) the filter
+    // runs at 1/2, 1/3... of it and the renderer scales it up.
+    SDL_FRect rect{};
+    SDL_GetRenderLogicalPresentationRect(r_, &rect);
+    int n = 1;
+    while ((rect.w / n) * (rect.h / n) > 2.2e6f) ++n;
+    int w = std::max(1, int(rect.w / n)), h = std::max(1, int(rect.h / n));
+    if (!crtTex_ || w != crt_.width() || h != crt_.height()) {
+        if (crtTex_) SDL_DestroyTexture(crtTex_);
+        crtTex_ = SDL_CreateTexture(r_, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, w, h);
+        if (!crtTex_) {
+            LOGW("Video: no CRT texture (%s); CRT filter off", SDL_GetError());
+            crtOn_ = false;
+            return;
+        }
+        SDL_SetTextureScaleMode(crtTex_, SDL_SCALEMODE_LINEAR);
+        crt_.resize(w, h);
+    }
+    composite(m, order, count, rgb_.data(), kW * 4);
+    void* pixels;
+    int pitch;
+    if (!SDL_LockTexture(crtTex_, nullptr, &pixels, &pitch)) return;
+    crt_.apply(rgb_.data(), static_cast<uint32_t*>(pixels), pitch);
+    SDL_UnlockTexture(crtTex_);
+    SDL_RenderTexture(r_, crtTex_, nullptr, nullptr);
+}
+
+void Video::composite(Machine& m, const int* order, int count, uint32_t* dst0, int pitch) {
     // Bottom layer paints every pixel, the layers above only their non-zero pixels. Sequential
     // passes over each layer beat the per-pixel "first opaque layer" search of the original.
     for (int k = count - 1; k >= 0; --k) {
@@ -132,13 +174,11 @@ void Video::presentSoftware(Machine& m, const int* order, int count) {
         for (int i = 0; i < 256; ++i) lut[i] = uint32_t(pal[i * 3]) << 16 | uint32_t(pal[i * 3 + 1]) << 8 | pal[i * 3 + 2];
         bool bottom = k == count - 1;
         for (int y = 0; y < kH; ++y, src += kW) {
-            auto* dst = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(pixels) + y * pitch);
+            auto* dst = reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(dst0) + y * pitch);
             if (bottom) for (int x = 0; x < kW; ++x) dst[x] = lut[src[x]];
             else        for (int x = 0; x < kW; ++x) if (src[x]) dst[x] = lut[src[x]];
         }
     }
-    SDL_UnlockTexture(frame_);
-    SDL_RenderTexture(r_, frame_, nullptr, nullptr);
 }
 
 void Video::shutdown() {
@@ -150,7 +190,8 @@ void Video::shutdown() {
     }
     if (frame_) SDL_DestroyTexture(frame_);
     if (screen_) SDL_DestroyTexture(screen_);
-    frame_ = screen_ = nullptr;
+    if (crtTex_) SDL_DestroyTexture(crtTex_);
+    frame_ = screen_ = crtTex_ = nullptr;
 }
 
 } // namespace c93

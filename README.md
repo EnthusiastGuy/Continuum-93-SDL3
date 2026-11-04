@@ -106,6 +106,7 @@ Start `continuum`. By default it boots the dual-boot selector (`Data/os/boot/boo
 | `bootProgram` | The `.asm` or `.c` file assembled or compiled and run at power-on |
 | `fullscreen` | Start in fullscreen |
 | `disableMouse` | Turn off the guest mouse API |
+| `crtFilter` | Show the screen as a CRT monitor would: curved glass, scanlines, phosphor mask (`true`/`false`, on by default) |
 
 The window can be resized freely; the 480×270 picture is scaled and letterboxed.
 

@@ -115,9 +115,15 @@ void padRemoved(SDL_JoystickID id) {
 // keeps tracking outside the window) and gamepads 0..3.
 void pollInput(SDL_Window* window, SDL_Renderer* renderer) {
     float gx, gy, lx, ly;
-    SDL_MouseButtonFlags mb = SDL_GetGlobalMouseState(&gx, &gy);
     int wx = 0, wy = 0;
+#ifdef __EMSCRIPTEN__
+    // A page has no "outside the window"; its global mouse is in page units that miss the canvas scaling.
+    SDL_MouseButtonFlags mb = SDL_GetMouseState(&gx, &gy);
+    (void)window;
+#else
+    SDL_MouseButtonFlags mb = SDL_GetGlobalMouseState(&gx, &gy);
     SDL_GetWindowPosition(window, &wx, &wy);
+#endif
     // Letterbox-aware; the reference divided by window/480 because it kept the window 16:9.
     SDL_RenderCoordinatesFromWindow(renderer, gx - float(wx), gy - float(wy), &lx, &ly);
 
@@ -173,7 +179,7 @@ struct Settings {
 };
 Settings loadSettings(const std::filesystem::path& data) {
     auto path = data / "init.cfg";
-    // The reference default file, verbatim (raw string: the paths keep their backslashes).
+    // The reference default file, verbatim (raw string: the paths keep their backslashes), plus crtFilter.
     static const char* kDefaults = R"(# This provides the configuration to be loaded when Continuum starts.
 
 # Controls whether the emulator enables network communication with any Continuum Tools listening.
@@ -184,6 +190,9 @@ fullscreen=false
 
 # Disables the mouse API (some linux based OSs need this for Continuum to run).
 disableMouse=false
+
+# Shows the screen as a CRT monitor would: curved glass, scanlines, phosphor mask (true or false).
+crtFilter=true
 
 # Points to the source file (.asm or .c) that will be automatically loaded and ran on boot.
 # The default is the dual-boot selector (Halcyon or Q OS); use Data\os\q.asm to boot Q OS directly.
@@ -243,6 +252,7 @@ int main(int argc, char** argv) {
         LOGE("Continuum: no window (%s)", SDL_GetError());
         return 1;
     }
+    if (settings.str("crtFilter") != "false") video.setCrt(true);   // on unless turned off (D-34)
 #ifndef _WIN32   // Windows takes the multi-size icon from the exe's resources (continuum.rc)
     static const uint8_t kIconPng[] = {
 #include "icon_png.inc"

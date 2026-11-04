@@ -8,6 +8,21 @@ then run `build/linux-arm64/continuum` on a real Raspberry Pi (64-bit OS). Optio
 docs/WEB.md (IDBFS saves, coi-serviceworker for GitHub Pages). Work lives on branch `feature/platforms`
 (from `main`).
 
+### 2026-11-04 — CRT filter (D-34), processor speed in Halcyon (D-35), web mouse fix
+- CRT: `src/crt.cpp` (own MIT filter, CPU), `Video::presentCrt`, `crtFilter` in init.cfg, on by default (a
+  missing key = on; checked with an init.cfg without it). `conformance --crt`
+  (black stays black, corners dark, white centre bright, ms/frame) passes on Windows, Linux x64 and wasm:
+  ~4.4–4.9 ms at 1440x810. Looked at on Windows (direct3d11): curved, scanlines, rounded corners. Not looked at
+  in the browser (same code path).
+- Halcyon: `Data/os/halcyon/hal_bench.c` + top bar, Pulse, About. Measured 815 MHz natively (16 M runs in
+  1,178,296 ticks), 246–262 MHz in headless Chrome. Seen in Chrome: count-up, Pulse line, About line,
+  click-to-remeasure. cc oracle regenerated (542/542; old one kept as `build/cc.before-bench.txt`).
+- Web mouse bug fixed: the pointer landed at the wrong place (SDL's "global" mouse is page units); the web
+  build now reads `SDL_GetMouseState`. Checked: click at CSS (700,400) puts the guest pointer there.
+- Gotcha: a build copies Data/ only when the exe relinks; after editing only Data/, copy it by hand (or touch a
+  source) before testing.
+- Seen, not fixed (also in the unmodified Halcyon): About's big rainbow "HALCYON" title does not draw.
+
 ### 2026-11-04 — Linux, Raspberry Pi and web builds (D-31, D-32)
 `build linux|web|all` in `build.cmd` and `build.sh`, through Docker (`docker/linux.Dockerfile`, emsdk 6.0.13).
 Code: the main loop is a `frame()` lambda over statics, so the browser can own the loop;

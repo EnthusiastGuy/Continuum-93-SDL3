@@ -74,6 +74,7 @@ add_executable(continuum WIN32
   src/log.cpp
   src/audio.cpp
   src/audio_xsound.cpp
+  src/crt.cpp
   src/asm.cpp
   src/basic.cpp
   src/cc_gen.cpp
@@ -140,7 +141,7 @@ endif()
 endif()
 
 # --- Conformance runner (no SDL): replays tests/oracle vectors through the CPU core -------
-add_executable(conformance tests/conformance.cpp src/service/disasm.cpp src/service/cpu_tracked.cpp src/audio.cpp src/audio_xsound.cpp src/asm.cpp src/basic.cpp src/cc_gen.cpp src/cc_parse.cpp src/cc_pp.cpp src/cpu.cpp src/ints.cpp src/ints_fs.cpp src/ints_input.cpp src/ints_text.cpp src/ints_video.cpp src/log.cpp)
+add_executable(conformance tests/conformance.cpp src/crt.cpp src/service/disasm.cpp src/service/cpu_tracked.cpp src/audio.cpp src/audio_xsound.cpp src/asm.cpp src/basic.cpp src/cc_gen.cpp src/cc_parse.cpp src/cc_pp.cpp src/cpu.cpp src/ints.cpp src/ints_fs.cpp src/ints_input.cpp src/ints_text.cpp src/ints_video.cpp src/log.cpp)
 if(EMSCRIPTEN)
   target_link_options(conformance PRIVATE -sNODERAWFS)   # runs under node and reads the vector files from disk
 endif()

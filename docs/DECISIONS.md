@@ -276,3 +276,23 @@ Measured on the running reference and settled to its usual outcome, deterministi
   22–56% of their cases. The bits are guest-visible (LD of a float register to memory, compares of raw bits).
 - `x86Nan(result, operands...)` (ops.h) in float MUL/DIV, POW, SQR/ISQR, SIN/COS/TAN; compiled out on x86.
   Operand NaNs are left to propagate (same on both). FADD/FSUB never store a NaN (they keep the operand).
+
+## D-34 CRT filter: our own (MIT), on the CPU, on by default — DECIDED 2026-11-04 (user: own filter, "same look")
+- The Fantastic-Dizzy port's filter is libretro's zfast_crt_curvature (GPL-2.0+); the user chose an own MIT
+  filter with the same ingredients over making the binaries GPL. `src/crt.cpp`: radial barrel (corners +3%),
+  rounded glass with a one-pixel soft rim, gaussian scanline beam that widens on bright pixels (falloff 3.2 → 1.0,
+  boost 1.3), RGB phosphor triad per output column (off-colours -22%, half on white).
+- CPU only, one path for every renderer (D3D, Vulkan, Metal, GL, WebGL, software): same pixels everywhere and no
+  shader toolchain. Position-only work is a per-pixel table rebuilt on resize; a frame is a 2-tap blend plus
+  lookups: 4.4 ms at 1440x810, 7.8 ms at 1080p (`conformance --crt`, Ryzen 9 9950X3D). Rendered at the
+  letterbox's real pixel size (crisp mask, no moiré); past 2.2 Mpx at 1/2, 1/3... and scaled by the GPU.
+- `crtFilter=true|false` in init.cfg, on by default (user): the default file says true and a missing key means
+  on, so existing init.cfg files get it too; `false` gives the reference's look. The service view stays unfiltered.
+
+## D-35 Halcyon shows the processor speed — DECIDED 2026-11-04 (user: "report the CPU correctly ... in the OS")
+- `hal_bench.c`: the CPU benchmark program's own loop and cycle model (D-17), 16 M runs in 32 slices of 500,000,
+  one per frame before the frame's work, so the desktop stays live. Once per cold start (a warm return keeps it).
+- Shown: the top bar ("815 MHz" beside "16M RAM", counting up in the accent colour while measuring); Pulse
+  ("Odin I  815 MHz" under the CPU load; a click on the chart measures again); About ("Odin I processor, 815 MHz"
+  in the line that was blank). Name from INT 0 0xF0, as the program.
+- The C oracle was regenerated: the reference compiles the new Halcyon to the same code (cc 542/542).
