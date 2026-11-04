@@ -279,9 +279,13 @@ Measured on the running reference and settled to its usual outcome, deterministi
 
 ## D-34 CRT filter: our own (MIT), on the CPU, on by default — DECIDED 2026-11-04 (user: own filter, "same look")
 - The Fantastic-Dizzy port's filter is libretro's zfast_crt_curvature (GPL-2.0+); the user chose an own MIT
-  filter with the same ingredients over making the binaries GPL. `src/crt.cpp`: radial barrel (corners +3%),
-  rounded glass with a one-pixel soft rim, gaussian scanline beam that widens on bright pixels (falloff 3.2 → 1.0,
+  filter with the same ingredients over making the binaries GPL. `src/crt.cpp`: per-axis bend (rows up to 3%
+  wider toward top and bottom, columns 4% taller toward the sides; edge middles fixed, so the whole picture stays
+  visible and its corners curve into black glass: the first radial barrel cut them off), rounded corners, a soft rim, gaussian scanline beam that widens on bright pixels (falloff 3.2 → 1.0,
   boost 1.3), RGB phosphor triad per output column (off-colours -22%, half on white).
+- Moiré (user, 2026-11-04): below ~3 output pixels per scanline, point-sampled deep gaps beat against the grid.
+  The beam is averaged over each output pixel's height, its depth eases to its mean from 3 px/line to 2, and the
+  mask fades from 3 px/column to 2. Checked on Q OS's flat beige at 2.24 px/line: no bands.
 - CPU only, one path for every renderer (D3D, Vulkan, Metal, GL, WebGL, software): same pixels everywhere and no
   shader toolchain. Position-only work is a per-pixel table rebuilt on resize; a frame is a 2-tap blend plus
   lookups: 4.4 ms at 1440x810, 7.8 ms at 1080p (`conformance --crt`, Ryzen 9 9950X3D). Rendered at the
@@ -296,3 +300,12 @@ Measured on the running reference and settled to its usual outcome, deterministi
   ("Odin I  815 MHz" under the CPU load; a click on the chart measures again); About ("Odin I processor, 815 MHz"
   in the line that was blank). Name from INT 0 0xF0, as the program.
 - The C oracle was regenerated: the reference compiles the new Halcyon to the same code (cc 542/542).
+
+## D-36 Packages and the website — DECIDED 2026-11-04 (user: zips for all platforms, macOS apart; a site to host)
+- `package.cmd` / `package.sh` → `dist/continuum93-<windows-x64|linux-x64|linux-arm64|web>.zip` and `dist/web/`.
+  Zipping runs in the emsdk image (it has Info-ZIP), so every host makes the same zips with Unix modes kept.
+  Each zip copies the repo's `Data/`, never the build folder's (local init.cfg, service layout).
+- Zip names carry no version: the site's buttons link fixed names; the version is written into the page.
+- `package-macos.sh` runs on a Mac (native arch; universal binary not tried: unverifiable here).
+- Site: the machine in an iframe (SDL fill-document owns its document); headers by `.htaccess`/`_headers`, with
+  our own small service worker (`coi-sw.js`) as the fallback rather than the third-party coi-serviceworker.

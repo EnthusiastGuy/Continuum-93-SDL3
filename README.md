@@ -94,6 +94,21 @@ build runs emulated, so the first one is slow.
 
 A build copies `Data/` next to the executable. The executable and `Data/` are all you need to distribute.
 
+### Packaging and the website
+
+`package.cmd` (Windows) or `./package.sh` (Linux/macOS) builds everything, then writes to `dist/`:
+
+| Output | What |
+|---|---|
+| `continuum93-windows-x64.zip`, `-linux-x64.zip`, `-linux-arm64.zip` | `Continuum93/` with the program, a clean `Data/`, README and LICENSE (Windows only from `package.cmd`) |
+| `continuum93-web.zip` | The four web files and the header files (`.htaccess`, `_headers`), to host the machine yourself |
+| `web/` | The website: the machine running in the page, with download buttons below. Upload the folder's contents as they are |
+
+macOS is packaged on a Mac: `./package-macos.sh` writes `dist/continuum93-macos-arm64.zip` (or `-x64`) and adds it to
+`dist/web/downloads/`. `--no-build` packages what is already built. The site needs two HTTP headers; it brings
+`.htaccess` (Apache) and `_headers` (Netlify, Cloudflare), and a service worker for hosts that allow neither
+([docs/WEB.md](docs/WEB.md)).
+
 ---
 
 ## Running

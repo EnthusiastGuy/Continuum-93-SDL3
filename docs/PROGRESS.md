@@ -3,10 +3,27 @@
 Read this first in every session. Update it at the end of every work block.
 
 **Current phase:** 9 — packaging (phases 1–8 done; speed pass done, D-29)
-**Next action:** macOS: run `./build.sh` on a Mac (or a GitHub Actions macOS runner) and fix what breaks;
-then run `build/linux-arm64/continuum` on a real Raspberry Pi (64-bit OS). Optional web follow-ups are in
+**Next action:** macOS: run `./package-macos.sh` on a Mac (or a GitHub Actions macOS runner) and fix what
+breaks; then run the linux-arm64 zip on a real Raspberry Pi (64-bit OS). The user uploads `dist/web/`. Optional web follow-ups are in
 docs/WEB.md (IDBFS saves, coi-serviceworker for GitHub Pages). Work lives on branch `feature/platforms`
 (from `main`).
+
+### 2026-11-04 — CRT fixes and the two-column site
+- CRT (D-34 updated): corners bend instead of being cut (per-axis bend); no moiré in small windows (scanline
+  depth and mask ease off below 3 px per source pixel). Checked: Windows 1440x810 screenshot, Q OS in the browser
+  at 1084x605 (zoomed: even faint lines, no bands), `--crt` on Windows and wasm.
+- Site: the machine on the left (as tall as the window allows), downloads + Continuum RX card + notes in a 330 px
+  column on the right; one column below 1000 px. Seen at 1440x810: everything visible without scrolling.
+
+### 2026-11-04 — packages and the website (D-36)
+- `package.cmd` / `package.sh` (build all, then zip in the emsdk container) → `dist/continuum93-<windows-x64|
+  linux-x64|linux-arm64|web>.zip` + `dist/web/` (the site). `package-macos.sh` for a Mac. Full run: 9 min.
+- Checked: each zip has 165 files (program, repo Data/, README, LICENSE), Linux binaries keep mode 755, no
+  init.cfg / serviceState / zz_ files; the web zip has the 4 files + `.htaccess` + `_headers`.
+- Site served locally both ways (scratchpad node server): with the headers, Halcyon runs in the iframe, sizes
+  show, macOS greyed "not available yet"; without them, coi-sw.js reloads once and the page is isolated.
+- `build.sh` was stored without its executable bit; fixed (`git add --chmod=+x`), as for the package scripts.
+- Not checked: package-macos.sh (no Mac), the real host (continuum93.tape-drive.xyz).
 
 ### 2026-11-04 — CRT filter (D-34), processor speed in Halcyon (D-35), web mouse fix
 - CRT: `src/crt.cpp` (own MIT filter, CPU), `Video::presentCrt`, `crtFilter` in init.cfg, on by default (a

@@ -10,6 +10,21 @@
 
 Upload these four files together. Nothing else is needed.
 
+## The website (`dist/web/`)
+
+`package.cmd` / `./package.sh` assembles a site to upload as it is (e.g. to continuum93.tape-drive.xyz):
+
+| Path | What |
+|---|---|
+| `index.html` | The page (from `web/index.html`): the machine, 16:9 and as large as the window allows, then the download buttons |
+| `play/` | The four files above. The page shows `play/continuum.html` in an iframe |
+| `downloads/` | Every zip from `dist/`. A button whose zip is missing is greyed out; the others show their size |
+| `.htaccess`, `_headers` | The two headers for Apache and for Netlify/Cloudflare |
+| `coi-sw.js` | A service worker that adds the headers when the server does not (HTTPS only; the page reloads once) |
+
+The machine is in an iframe because SDL's fill-document mode takes over its whole document: it hides every
+other element on the page. The iframe gets keyboard focus when it loads; the Full screen button enlarges it.
+
 ## Serving: two headers are required
 
 The CPU and the audio run on their own threads, as on the desktop. Browsers allow threads
@@ -33,7 +48,7 @@ Without them, the page shows a message instead of the machine.
     Cross-Origin-Embedder-Policy: require-corp
   ```
 - **nginx**: `add_header Cross-Origin-Opener-Policy same-origin;` and `add_header Cross-Origin-Embedder-Policy require-corp;`
-- **GitHub Pages** cannot set headers. Add the `coi-serviceworker` script to the page, which works around this.
+- **GitHub Pages** (and any host without header control): the site's `coi-sw.js` adds them in the browser.
 
 ## How it differs from the desktop build
 
