@@ -3,10 +3,35 @@
 Read this first in every session. Update it at the end of every work block.
 
 **Current phase:** 9 — packaging (phases 1–8 done; speed pass done, D-29)
-**Next action:** release builds on Linux and macOS (`build.sh`; WSL Ubuntu here has GCC 15 but no
-cmake/ninja; installing them needs the user's sudo), then the Raspberry Pi. The non-Windows window icon
-(`SDL_SetWindowIcon` from the compiled-in `icon/window.png`) has not been compiled yet: check it there.
-Work lives on branch `feature/sdl3-port`.
+**Next action:** macOS: run `./build.sh` on a Mac (or a GitHub Actions macOS runner) and fix what breaks;
+then run `build/linux-arm64/continuum` on a real Raspberry Pi (64-bit OS). Optional web follow-ups are in
+docs/WEB.md (IDBFS saves, coi-serviceworker for GitHub Pages). Work lives on branch `feature/platforms`
+(from `main`).
+
+### 2026-11-04 — Linux, Raspberry Pi and web builds (D-31, D-32)
+`build linux|web|all` in `build.cmd` and `build.sh`, through Docker (`docker/linux.Dockerfile`, emsdk 6.0.13).
+Code: the main loop is a `frame()` lambda over statics, so the browser can own the loop;
+`SDL_WINDOW_FILL_DOCUMENT`; `init.cfg` falls back to the built-in defaults when Data/ is read-only (was: the
+test card); json.h `Member` struct (libstdc++ 12); plain `copy_directory` (CMake 3.25 on bookworm). Page:
+`web/shell.html` (canvas in its own div: SDL 3.4.20 fill-document restore bug); docs/WEB.md.
+Verified:
+- Windows: rebuilt, boots Halcyon, closes cleanly; vectors 1072/1072, programs 44/44.
+- Linux x64 (in the container): programs 44, asm 132 + 5 D-9 (oracle paths rewritten to POSIX in
+  `build/asm-posix.txt`), cc 541, basic 228 + 113, disasm, xsound 0 differ, basicrun, watch, immediate, input:
+  all as Windows. Vectors: 373 of 103,487 wrong, all 1-ULP libm CBR/SIN/COS/TAN (D-31). Needs GLIBC_2.36,
+  links libc/libm only. Bench (clang 16): ADD 1036, loop 435, memory 523, CALL 814, C 488 M instr/s.
+  Under WSLg: OpenGL, audio, boots Halcyon; read-only Data/ → WARN + defaults, still boots.
+- Web: every suite as Linux when node runs *inside the emsdk container* (node on Windows mangles `C:\`
+  paths under NODERAWFS); same D-31 libm diffs. Bench (node): 160–216 M instr/s. Headless Chrome, driven over
+  DevTools: boot menu, Halcyon, Q OS via Right+Enter, F1 service mode, letterboxed to the page.
+- Linux arm64 (emulated in Docker): programs 44, asm 132 + 5 D-9, cc 541, xsound 0 differ. Vectors found
+  D-33 (ARM's default NaN bits: 24 SQR/ISQR/POW variants); fixed with `x86Nan`; after it, only 1-ULP
+  SIN/COS/TAN cases remain (D-31). Windows still 1072/1072, web unchanged after the fix.
+- Gotcha: run program suites with a fresh `C93_FS` copy (tests/programs.cmd), never two at once.
+- Not checked: the window icon on Linux (set without error, not looked at), the arm64 app on real hardware
+  (only the test runner ran, emulated), macOS at all, sound in the browser (device opens; not listened to).
+  Not re-run after D-33: the full arm64 vector set (only the float families) and the Linux x64 suites
+  (x86Nan compiles to nothing there).
 
 ### 2026-11-04 — the user's decisions applied
 D-24 (F1 exit resumes), D-17 (benchmark MHz = i486-class equivalent clock, ~800 MHz here), D-9 (unencodable
@@ -58,7 +83,8 @@ match. No device: `Audio: no output device (...); running silent`. No guest prog
 - [x] 7 Settings, fullscreen, gamepad, cursor, command line (`-help`, `-png2font`; D-28)
 - [x] 8 Service mode — wave 1 (framework, Emulator/Disassembler/Registers/Flags/Status, debugger) and
       wave 2 (every remaining window and popup, `docs/SERVICE.md`); D-23..D-27
-- [ ] 9 Speed pass (done, D-29), app icon (done), packaging on 3 OSes (Windows done; Linux, macOS, Pi open)
+- [ ] 9 Speed pass (done, D-29), app icon (done), builds: Windows, Linux x64/arm64, web (D-32) done;
+      macOS and a run on a real Pi open
 
 ### Phase 2 — instruction families (C# file → status)
 

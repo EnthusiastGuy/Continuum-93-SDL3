@@ -126,7 +126,7 @@ template <bool S> void fillDivRem(Op* t) {
 // --- Float MUL / DIV ------------------------------------------------------------------------
 template <bool D> inline void frMulDiv(Machine& m, uint8_t f, float v) {
     if (D && v == 0) return;
-    float r = D ? m.fr(f) / v : m.fr(f) * v;
+    float r = x86Nan(D ? m.fr(f) / v : m.fr(f) * v, m.fr(f), v);
     m.f[2] = r < 0;
     m.fr(f) = r;
 }
@@ -151,7 +151,7 @@ template <bool D, Kind K> uint32_t memMD(Machine& m, uint32_t ip) {   // (mem) o
     else { uint8_t hi = subByte(m, ip), x = m.fetch8(ip); f = uint8_t((hi & 3) << 2 | x >> 6); a = m.get<24>(x & 31); }
     float v = m.rdF(a);
     if (D && v == 0) C93_NEXT(ip);   // the reference tested the dividend, not the divisor
-    float r = D ? v / m.fr(f) : v * m.fr(f);
+    float r = x86Nan(D ? v / m.fr(f) : v * m.fr(f), v, m.fr(f));
     m.f[2] = r < 0;
     m.wrF(a, r);
     C93_NEXT(ip);
@@ -198,20 +198,20 @@ template <Kind K, int FShift> FA frAddr(Machine& m, uint32_t& ip) {
     else return {uint8_t(x >> FShift & 15), m.fetch<24>(ip)};
 }
 
-inline uint32_t powFrFr(Machine& m, uint32_t ip) { uint8_t x = m.fetch8(ip); m.fr(x >> 4) = std::pow(m.fr(x >> 4), m.fr(x & 15)); C93_NEXT(ip); }
+inline uint32_t powFrFr(Machine& m, uint32_t ip) { uint8_t x = m.fetch8(ip); m.fr(x >> 4) = fPow(m.fr(x >> 4), m.fr(x & 15)); C93_NEXT(ip); }
 template <int W> uint32_t powFrReg(Machine& m, uint32_t ip) {
     uint8_t x = m.fetch8(ip);
-    m.fr(x & 15) = std::pow(m.fr(x & 15), float(m.get<W>(x >> 4)));
+    m.fr(x & 15) = fPow(m.fr(x & 15), float(m.get<W>(x >> 4)));
     C93_NEXT(ip);
 }
 template <int W> uint32_t powRegFr(Machine& m, uint32_t ip) {
     uint8_t x = m.fetch8(ip), r = x >> 4;
-    m.set<W>(r, netTrunc(std::pow(float(m.get<W>(r)), m.fr(x & 15))));
+    m.set<W>(r, netTrunc(fPow(float(m.get<W>(r)), m.fr(x & 15))));
     C93_NEXT(ip);
 }
-template <Kind K> uint32_t powFrMem(Machine& m, uint32_t ip) { FA o = frAddr<K, 4>(m, ip); m.fr(o.f) = std::pow(m.fr(o.f), m.rdF(o.a)); C93_NEXT(ip); }
-template <Kind K> uint32_t powMemFr(Machine& m, uint32_t ip) { FA o = frAddr<K, 4>(m, ip); m.wrF(o.a, std::pow(m.rdF(o.a), m.fr(o.f))); C93_NEXT(ip); }
-inline uint32_t powFrImm(Machine& m, uint32_t ip) { uint8_t f = m.fetch8(ip) >> 4; m.fr(f) = std::pow(m.fr(f), fromBits(m.fetch<32>(ip))); C93_NEXT(ip); }
+template <Kind K> uint32_t powFrMem(Machine& m, uint32_t ip) { FA o = frAddr<K, 4>(m, ip); m.fr(o.f) = fPow(m.fr(o.f), m.rdF(o.a)); C93_NEXT(ip); }
+template <Kind K> uint32_t powMemFr(Machine& m, uint32_t ip) { FA o = frAddr<K, 4>(m, ip); m.wrF(o.a, fPow(m.rdF(o.a), m.fr(o.f))); C93_NEXT(ip); }
+inline uint32_t powFrImm(Machine& m, uint32_t ip) { uint8_t f = m.fetch8(ip) >> 4; m.fr(f) = fPow(m.fr(f), fromBits(m.fetch<32>(ip))); C93_NEXT(ip); }
 
 inline void fillPow(Op* t) {
     for (int i = 0; i < 256; ++i) t[i] = nop;
@@ -232,9 +232,9 @@ inline void fillPow(Op* t) {
 }
 
 // F::f is the float function; F::d the one "rrrr" (in place) used.
-struct Sqr { static float f(float x) { return std::sqrt(x); } static double d(float x) { return std::sqrt(double(x)); } };
+struct Sqr { static float f(float x) { return x86Nan(std::sqrt(x), x); } static double d(float x) { return std::sqrt(double(x)); } };
 struct Cbr { static float f(float x) { return std::cbrt(x); } static double d(float x) { return std::cbrt(double(x)); } };
-struct ISqr { static float f(float x) { return 1.0f / std::sqrt(x); } static double d(float x) { return f(x); } };
+struct ISqr { static float f(float x) { return x86Nan(1.0f / std::sqrt(x), x); } static double d(float x) { return f(x); } };
 
 template <class F> uint32_t rootFr(Machine& m, uint32_t ip) { uint8_t f = fetchF(m, ip); m.fr(f) = F::f(m.fr(f)); C93_NEXT(ip); }
 template <class F, int W> uint32_t rootReg(Machine& m, uint32_t ip) {
@@ -284,9 +284,9 @@ template <class F> void fillRoot(Op* t) {
 
 // --- One-operand float ops ------------------------------------------------------------------------
 inline float fNeg(float x) { return -x; }
-inline float fSin(float x) { return std::sin(x); }
-inline float fCos(float x) { return std::cos(x); }
-inline float fTan(float x) { return std::tan(x); }
+inline float fSin(float x) { return x86Nan(std::sin(x), x); }
+inline float fCos(float x) { return x86Nan(std::cos(x), x); }
+inline float fTan(float x) { return x86Nan(std::tan(x), x); }
 inline float fAbs(float x) { return std::fabs(x); }
 inline float fRound(float x) { return std::nearbyint(x); }   // MathF.Round: half to even
 inline float fFloor(float x) { return std::floor(x); }

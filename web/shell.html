@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Continuum 93</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; outline: none; image-rendering: pixelated; }
+  #status { position: absolute; color: #8a8; font: 16px monospace; }
+</style>
+</head>
+<body>
+<!-- Own parent: SDL 3.4.20 puts the canvas back with insertBefore(nextSibling), which throws if it has a sibling. -->
+<div><canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas></div>
+<div id="status">Loading Continuum 93...</div>
+<script>
+  var statusEl = document.getElementById('status');
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    setStatus: function (s) { statusEl.textContent = s; statusEl.hidden = !s; },
+    monitorRunDependencies: function (left) { if (!left && self.crossOriginIsolated) Module.setStatus(''); },
+  };
+  // Threads need SharedArrayBuffer, which browsers give only to cross-origin isolated pages.
+  if (!self.crossOriginIsolated)
+    Module.setStatus('This page must be served with the COOP/COEP headers (see docs/WEB.md).');
+  window.onerror = function () { Module.setStatus('Continuum 93 stopped: see the browser console.'); };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

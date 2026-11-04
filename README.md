@@ -45,9 +45,10 @@ same picture. The log says which path is active.
 | Platform | Status |
 |---|---|
 | Windows 10/11 x64 | Built and verified (MSVC, `build.cmd`) |
-| Linux x64 / arm64 | Portable code; the CPU core builds warning-free with GCC 15. A full SDL build has not been verified yet |
-| macOS (Apple silicon / Intel) | Portable code; not built yet |
-| Raspberry Pi (64-bit OS) | Same as Linux arm64; not tested yet |
+| Linux x64 | Built (`build linux`, Docker) and verified: test suites; boots under WSLg |
+| Linux arm64 / Raspberry Pi (64-bit OS) | Built (`build linux`, emulated); not yet run on a Pi |
+| Web (WebAssembly) | Built (`build web`, Docker) and verified: test suites under Node; Halcyon boots in Chrome. See [docs/WEB.md](docs/WEB.md) |
+| macOS (Apple silicon / Intel) | Portable code; not built yet (needs a Mac: `./build.sh`) |
 
 The code is portable C++20 plus SDL3. OS-specific code exists only behind guarded `#if` blocks. There are no
 compiler intrinsics without a portable fallback, and no assumptions about endianness. On GCC and Clang,
@@ -79,6 +80,17 @@ build.cmd debug      :: Debug, with a console showing the log
 
 On Linux, install SDL3's build dependencies first (X11/Wayland, ALSA/PulseAudio/PipeWire headers; see
 the [SDL3 Linux README](https://wiki.libsdl.org/SDL3/README-linux)).
+
+**Every platform from one machine** (needs [Docker](https://www.docker.com/); same targets in `build.cmd` and `build.sh`):
+
+| Command | Output |
+|---|---|
+| `build linux` | `build/linux-x64`, `build/linux-arm64`: glibc 2.36+, so Raspberry Pi OS bookworm, Ubuntu 22.04+, Debian 12+ |
+| `build web` | `build/web`: a page that runs the machine; see [docs/WEB.md](docs/WEB.md) for hosting |
+| `build all` | the native release, then linux, then web |
+
+macOS can only be built on a Mac (`./build.sh` there; `./build.sh all` adds Linux and web). The arm64
+build runs emulated, so the first one is slow.
 
 A build copies `Data/` next to the executable. The executable and `Data/` are all you need to distribute.
 

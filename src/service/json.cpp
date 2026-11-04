@@ -72,7 +72,7 @@ struct Parser {
                 if (!string(k)) return false;
                 ws();
                 if (i >= s.size() || s[i++] != ':') return false;
-                v.obj.emplace_back(std::move(k), Value{});
+                v.obj.push_back({std::move(k), Value{}});
                 if (!value(v.obj.back().second, depth + 1)) return false;
                 ws();
                 if (i >= s.size()) return false;

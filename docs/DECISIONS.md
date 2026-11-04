@@ -250,3 +250,29 @@ Measured on the running reference and settled to its usual outcome, deterministi
 - Cost: WATCHER-armed runs ~5% slower on MSVC (every instruction leaves the chain); faster on GCC.
 - Measured in PLAN.md → Benchmarks; behaviour checked by every suite plus `--bench` (each mix's end state
   under `run()` equals `step()`'s, plain, watched and `--tracked`).
+
+## D-31 Float SIN/COS/TAN/CBR follow the host's libm in the last bit — NOTE (2026-11-04)
+- The oracle is .NET on Windows: `MathF.Sin/Cos/Tan/Cbrt` call the Windows CRT. The port calls the host's
+  `std::sin/cos/tan/cbrt(float)`, so Linux (glibc) and the web (musl) differ from the vectors by 1 ULP in
+  ~1/4 of the CBR cases and a few SIN/COS/TAN cases (373 of 103,487; every other instruction matches). The
+  reference on .NET for Linux/macOS would differ the same way.
+- Tried: computing in double and rounding once (correctly rounded everywhere). It broke 353 cases on
+  Windows: the Windows CRT is not correctly rounded either, so no portable formula reproduces it.
+- Upgrade path if bit-identical floats across hosts ever matter: ship our own float sin/cos/tan/cbrt
+  (then Windows differs from the reference instead).
+
+## D-32 Linux and web builds run in Docker — DECIDED 2026-11-04 (user: "easy to build them all at once")
+- `build linux|web|all` (both scripts). Linux: Debian bookworm image (`docker/linux.Dockerfile`):
+  glibc 2.36, so one binary runs on Raspberry Pi OS bookworm, Ubuntu 22.04+, Debian 12+; clang 16 for
+  musttail (bookworm's GCC 12 has none, D-29). arm64 builds emulated (QEMU) instead of a cross toolchain.
+- Web: `emscripten/emsdk:6.0.13`, pinned. pthreads (the CPU and APU keep their threads, so the page needs
+  COOP/COEP headers), `-fwasm-exceptions` (the compilers throw), `-mtail-call` (musttail). The main loop
+  is `frame()`, called by `emscripten_set_main_loop` on the web and by `while` elsewhere.
+- macOS builds only on a Mac (Apple SDK licence); `./build.sh` there.
+
+## D-33 A NaN made by a float op gets the x86 bits on every host — DECIDED 2026-11-04
+- x86 (the reference's hardware) makes `0xFFC00000` from non-NaN operands (sqrt(-1), 0*inf, pow(-2, 0.5),
+  sin(inf)); ARM makes `0x7FC00000`, WebAssembly either. Found on Linux arm64: 24 SQR/ISQR/POW variants failed,
+  22–56% of their cases. The bits are guest-visible (LD of a float register to memory, compares of raw bits).
+- `x86Nan(result, operands...)` (ops.h) in float MUL/DIV, POW, SQR/ISQR, SIN/COS/TAN; compiled out on x86.
+  Operand NaNs are left to propagate (same on both). FADD/FSUB never store a NaN (they keep the operand).
