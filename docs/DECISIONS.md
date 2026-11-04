@@ -46,15 +46,18 @@ or address that runs past 16 MB writes outside the RAM array: the oracle crashed
 process with an AccessViolation. The port will clamp/wrap at 24 bits like every other
 access. Worth fixing in the C# project too.
 
-## D-9 Unknown operand shapes emit only the opcode byte — OPEN (user's call)
-Corrected 2026-11-04 by the assembler port: the reference assembler does not drop `LD (KLM), 1`;
-a line whose operand shape has no table entry (e.g. `LD (rrr), n`) emits just the primary opcode
-byte (no error), which then swallows the start of the next instruction. Shipped programs hit it:
-`LD (BCD), 0` and `LD (.zOffset), 0` in Data programs, `//INT ...` lines (`//` is not a comment
-for the assembler), stray `DR`/`ER` lines. The port reproduces it byte for byte and logs
-`Assembler: line N: '...' emits only its opcode byte (reference behaviour, see D-9)`.
-Options: keep (programs behave as on the reference) or make it an error (safer for new code,
-but changes how those shipped programs run). Proposal: keep + warning; fix the shipped sources.
+## D-9 Unknown operand shapes are an assembler error — DECIDED 2026-11-04 (user)
+The reference assembler, for a line whose operand shape has no opcode-table entry (e.g. `LD (rrr), n`)
+or whose mnemonic is unknown (`//INT ...`: `//` is not a comment; stray `DR`/`ER`), emits only the primary
+opcode byte (0x00 for an unknown mnemonic) with no error; the byte then swallows the start of the next
+instruction. The port makes such a line an error, counted like the reference's "unrecognized operand"
+errors (one per line), and emits nothing for it:
+`Assembler: <path> line N: 'LD (BCD), 0': no LD form takes operands (rrr),nnn` / `...: unknown mnemonic //INT`.
+Shipped sources fixed: font-test (`//INT`, `//WAIT` -> `;`), isometric-demo and oldOS os/os v2
+(`LD (x), 0` -> `LD (x), 0, 1`; `DR`/`ER` commented out); they assemble byte-identical to the reference.
+conformance --asm/--basic count such cases as "expected divergence (D-9)" (all but the bytes must still
+match). The reference BASIC compiler's generated code also hit it (`CP A, HI`, `INT ABCD`, ...); fixed
+with D-18.
 
 ## D-10 CP sets comparison flags, not carry/zero — NOTE
 Programs branch after CP with `EQ/NE/LT/GT/LTE/GTE`; `C`/`NZ` after CP test stale flags.
