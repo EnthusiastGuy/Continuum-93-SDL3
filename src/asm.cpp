@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <unordered_set>
 
@@ -248,23 +249,17 @@ std::optional<float> floatOf(std::string_view s) {
     if (i < s.size() && s[i] == '.') ++i;
     while (i < s.size() && s[i] >= '0' && s[i] <= '9') ++i, ++digits;
     if (!digits) return std::nullopt;
-    bool negExp = false;
     if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
         size_t j = i + 1;
-        if (j < s.size() && (s[j] == '+' || s[j] == '-')) negExp = s[j++] == '-';
+        if (j < s.size() && (s[j] == '+' || s[j] == '-')) ++j;
         size_t k = j;
         while (k < s.size() && s[k] >= '0' && s[k] <= '9') ++k;
         if (k == j) return std::nullopt;
         i = k;
     }
     if (i != s.size()) return std::nullopt;
-    float f = 0;
-    auto r = std::from_chars(s.data(), s.data() + s.size(), f);
-    if (r.ec == std::errc::result_out_of_range) {   // rounds to 0 or infinity
-        double d = 0;
-        auto rd = std::from_chars(s.data(), s.data() + s.size(), d);
-        f = rd.ec == std::errc() ? float(d) : negExp ? 0.0f : INFINITY;
-    }
+    // strtof, not from_chars: Apple's libc++ has no float from_chars. Correctly rounded, overflow -> inf, underflow -> 0.
+    float f = std::strtof(std::string(s).c_str(), nullptr);
     return neg ? -f : f;
 }
 uint32_t floatBits(float f) { uint32_t b; std::memcpy(&b, &f, 4); return b; }
