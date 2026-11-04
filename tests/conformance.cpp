@@ -6,7 +6,8 @@
 //   conformance --programs <programs.txt>        whole programs (oracle --programs)
 //   conformance --asm <asm.txt>                  assembler output per file (oracle --asm)
 //   conformance --basic <basic.txt>              BASIC compiler output per source (oracle --basic)
-//   conformance --cc <cc.txt>                    C compiler output per source (oracle --cc)
+//   conformance --basicrun <dir> [reference]     BASIC programs run, variables checked (D-18; reference: old code)
+//   conformance --cc <cc.txt>                   C compiler output per source (oracle --cc)
 //   conformance --disasm <disasm.txt>            service-mode disassembler text (oracle --disasm)
 //   conformance --xsound <xsound.bin>            XSound PCM per sound definition (oracle --xsound)
 //   conformance --watch <watch.txt>              service-mode WATCHER conditions (oracle --watch)
@@ -430,10 +431,12 @@ int asmTest(const char* path) {
     return fail ? 1 : 0;
 }
 
-// BASIC vectors (oracle --basic): compile each source with the C++ compiler; assembly, error count and
-// log must be identical. On a mismatch, print the first differing line with the line before it. Then the
-// same source goes through INT 0 0xC1 (from a scratch guest file system next to the vectors): registers
-// and loaded RAM must be what BuildBasic produced with the reference assembler's blocks.
+// BASIC vectors (oracle --basic): compile each source with the C++ compiler in reference mode; assembly, error
+// count and log must be identical. On a mismatch, print the first differing line with the line before it.
+// The default (D-18 fixed) output may differ only through its fixed code paths: same errors and log, and it
+// must assemble with no error and no unencodable line ("D-18" when its text differs). Then the same source
+// goes through INT 0 0xC1 (from a scratch guest file system next to the vectors): registers and loaded RAM
+// must be what BuildBasic produced with the reference assembler's blocks (the fixed program's, for D-18).
 std::string firstDiff(const std::string& want, const std::string& got) {
     size_t k = 0;
     while (k < want.size() && k < got.size() && want[k] == got[k]) ++k;
@@ -491,14 +494,32 @@ int basicTest(const char* path) {
     std::filesystem::create_directories(fsRoot);
     gFsRoot = fsRoot.string();
     auto m = std::make_unique<Machine>();
-    int pass = 0, fail = 0;
+    int pass = 0, fail = 0, d18n = 0;
+    auto noInclude = [](const std::string&) { return std::optional<std::string>(); };
     for (auto& w : all) {
-        BasicResult r = compileBasic(w.src);
+        BasicResult r = compileBasic(w.src, 0x080000, true);   // the reference's text, exactly
         std::string why;
         if (r.errors != w.errors) why = "errors: want " + std::to_string(w.errors) + ", got " + std::to_string(r.errors) + "\n  ";
         if (r.runAddress != w.run) why += "run address differs\n  ";
         if (std::string d = firstDiff(w.asmText, r.asmText); !d.empty()) why += "asm " + d + "\n  ";
         if (std::string d = firstDiff(w.log, r.log); !d.empty()) why += "log " + d + "\n  ";
+        // D-18: the compiler's own output differs from that only in its fixed code paths; it must keep the
+        // errors and log, and assemble with no error and no line the assembler cannot encode (D-9).
+        BasicResult f = compileBasic(w.src);
+        bool d18 = f.asmText != r.asmText;
+        if (f.errors != r.errors || f.log != r.log || f.runAddress != r.runAddress) why += "D-18 output changes errors, log or run address\n  ";
+        AsmResult fa = assemble(f.asmText, "", noInclude);
+        if (!f.errors && !f.asmText.empty() && !w.threw) {
+            for (auto& e : fa.errors) why += "D-18 output, assembler line " + std::to_string(e.line) + ": " + e.text + "\n  ";
+            for (auto& e : fa.warnings)
+                if (e.text.find("only the opcode byte") != std::string::npos) why += "D-18 output, assembler line " + std::to_string(e.line) + ": " + e.text + "\n  ";
+            if (!fa.fatal.empty()) why += "D-18 output does not assemble: " + fa.fatal + "\n  ";
+        }
+        if (d18 && !w.errors) {   // INT 0 0xC1 now loads the fixed program
+            w.blocks = fa.blocks;
+            w.asmErrors = uint32_t(fa.errors.size());
+            w.asmRun = fa.runAddress;
+        }
         if (!w.threw) {   // the reference's BuildBasic threw with the assembler: nothing to compare
             std::ofstream(fsRoot / "t.bas", std::ios::binary) << w.src;
             m->reset();
@@ -520,8 +541,8 @@ int basicTest(const char* path) {
                     why += buf;
                 }
         }
-        why.empty() ? ++pass : ++fail;
-        std::printf("%s %s%s%s\n", why.empty() ? "ok  " : "FAIL", w.file.c_str(), why.empty() ? "" : "\n  ", why.c_str());
+        why.empty() ? (d18 ? ++d18n : ++pass) : ++fail;
+        std::printf("%s %s%s%s\n", !why.empty() ? "FAIL" : d18 ? "D-18" : "ok  ", w.file.c_str(), why.empty() ? "" : "\n  ", why.c_str());
         if (w.refUs) {
             double best = 1e30;
             for (int k = 0; k < 20; ++k) {
@@ -532,8 +553,57 @@ int basicTest(const char* path) {
             std::printf("     time: %.2f ms (reference %.2f ms), %zu source bytes\n", best, double(w.refUs) / 1000.0, w.src.size());
         }
     }
-    std::printf("basic: %d ok, %d fail\n", pass, fail);
+    std::printf("basic: %d ok, %d expected divergence (D-18), %d fail\n", pass, d18n, fail);
     return fail ? 1 : 0;
+}
+
+// BASIC runtime (D-18): compile and run each .bas under dir in the port, then check the variables its
+// "' expect name = value" lines name (value: "text" for name$, an integer otherwise). The program must end
+// with its own final RET, which returns into a BREAK planted at 0x100 (a halt or a runaway fails).
+// reference: compile as the reference does (every tests/basicrun program fails that way).
+int basicRunTest(const char* dir, bool reference) {
+    std::vector<std::filesystem::path> files;
+    for (auto& e : std::filesystem::recursive_directory_iterator(dir))
+        if (e.path().extension() == ".bas") files.push_back(e.path());
+    std::sort(files.begin(), files.end());
+    auto m = std::make_unique<Machine>();
+    int pass = 0, fail = 0;
+    for (auto& f : files) {
+        std::string src = readFile(f.string()).value_or(""), why;
+        BasicResult b = compileBasic(src, 0x080000, reference);
+        AsmResult a = assemble(b.asmText, "", [](const std::string&) { return std::optional<std::string>(); });
+        if (b.errors || !a.errors.empty() || a.blocks.empty())
+        {
+            size_t e = b.log.find("rror"), s = e == std::string::npos ? 0 : b.log.rfind('\n', e) + 1;   // the first error line
+            why = "does not build: " + (b.errors ? b.log.substr(s, b.log.find('\n', s) - s) : a.errors.empty() ? "no code" : a.errors[0].text) + "\n  ";
+        }
+        if (const char* d = std::getenv("C93_BASIC_DUMP")) std::ofstream(std::filesystem::path(d) / (f.stem().string() + ".asm"), std::ios::binary) << b.asmText;
+        m->reset();
+        for (auto& blk : a.blocks) std::memcpy(m->ram + blk.start, blk.data.data(), blk.data.size());
+        m->ram[0x100] = 253;                          // BREAK
+        m->cs[0] = 0x100; m->spc = 1;                 // the program's last RET returns there
+        m->ip = a.runAddress; m->running = true;
+        for (int n = 0; n < 5'000'000 && m->running.load(); ++n) m->step();
+        if (why.empty() && m->ip != 0x101) why = "did not end normally (IP " + std::to_string(m->ip) + ")\n  ";
+        bool ran = why.empty();   // check every expectation of a program that ran
+        std::istringstream ls(src);
+        for (std::string l; ran && std::getline(ls, l);) {
+            if (l.rfind("' expect ", 0)) continue;
+            std::string name = l.substr(9, l.find(" = ") - 9), want = l.substr(l.find(" = ") + 3);
+            while (!want.empty() && want.back() == '\r') want.pop_back();
+            bool str = name.back() == '$';
+            std::string label = ".var_" + std::string(str ? "str_" : "int_") + name.substr(0, name.size() - str);
+            if (!a.labels.count(label)) { why += name + ": no such variable\n  "; continue; }
+            const uint8_t* p = m->ram + a.labels.at(label);
+            std::string got = str ? "\"" + std::string((const char*)p, strnlen((const char*)p, 256)) + "\""
+                                  : std::to_string(int32_t(uint32_t(p[0]) << 24 | p[1] << 16 | p[2] << 8 | p[3]));
+            if (got != want) why += name + ": want " + want + ", got " + got + "\n  ";
+        }
+        why.empty() ? ++pass : ++fail;
+        std::printf("%s %s%s%s\n", why.empty() ? "ok  " : "FAIL", f.filename().string().c_str(), why.empty() ? "" : "\n  ", why.c_str());
+    }
+    std::printf("basicrun: %d ok, %d fail\n", pass, fail);
+    return fail || files.empty() ? 1 : 0;
 }
 
 // C compiler vectors (oracle --cc): compile each recorded source with the C++ compiler, replaying the
@@ -843,6 +913,7 @@ int main(int argc, char** argv) {
     if (argc == 3 && !std::strcmp(argv[1], "--programs")) return programs(argv[2]);
     if (argc == 3 && !std::strcmp(argv[1], "--asm")) return asmTest(argv[2]);
     if (argc == 3 && !std::strcmp(argv[1], "--basic")) return basicTest(argv[2]);
+    if ((argc == 3 || argc == 4) && !std::strcmp(argv[1], "--basicrun")) return basicRunTest(argv[2], argc == 4 && !std::strcmp(argv[3], "reference"));
     if (argc == 3 && !std::strcmp(argv[1], "--cc")) return ccTest(argv[2]);
     if (argc == 3 && !std::strcmp(argv[1], "--disasm")) return disasmTest(argv[2]);
     if (argc == 3 && !std::strcmp(argv[1], "--xsound")) return xsoundTest(argv[2]);

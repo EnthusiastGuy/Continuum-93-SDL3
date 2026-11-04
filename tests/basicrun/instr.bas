@@ -1,0 +1,24 @@
+' D-18: INSTR([start,] s$, find$), 1-based, 0 when not found
+a = INSTR("Hello", "el")
+b = INSTR(3, "Hello", "l")
+c = INSTR("Hello", "z")
+d = INSTR("Hello", "")
+ee = INSTR("", "a")
+f = INSTR(10, "Hello", "l")
+g = INSTR("Hello", "lo")
+h = INSTR("aab", "ab")
+i = INSTR(0, "abc", "a")
+j = INSTR("abc", "abcd")
+s$ = "one two"
+k = 10 + INSTR(s$, "two") * 2
+' expect a = 2
+' expect b = 3
+' expect c = 0
+' expect d = 0
+' expect ee = 0
+' expect f = 0
+' expect g = 4
+' expect h = 2
+' expect i = 1
+' expect j = 0
+' expect k = 20

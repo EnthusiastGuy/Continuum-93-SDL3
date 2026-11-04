@@ -1,9 +1,14 @@
 // Continuum 93 BASIC compiler, ported line for line from the reference
 // (Compilers/C93Basic: BasicCompiler.cs, Lexer.cs, Token.cs, Parser.cs, AST.cs, SymbolTable.cs,
-// VariableManager.cs, Emitter.cs). Output text, error count and log are identical to the reference;
-// verified by `conformance --basic` against tests/oracle --basic.
+// VariableManager.cs, Emitter.cs). Error count and log are identical to the reference; so is the text with
+// compileBasic(..., reference = true), verified by `conformance --basic` against tests/oracle --basic.
 //
-// Reproduced reference quirks (do not "fix" without a recorded decision):
+// D-18: by default the emitted code is fixed where the reference's could not run (the "!ref_" branches):
+// lines with no opcode form (operand widths, floats in integer forms, MOD/INT/NEG/WAIT r, "LD .label, r",
+// hex without 0x), temps clobbered by fixed registers, and the string runtime (basic_helpers_d18.inc).
+// Checked by `conformance --basic` (assembles cleanly) and `conformance --basicrun tests/basicrun`.
+//
+// Reproduced reference quirks (do not "fix" without a recorded decision; the reference mode keeps all):
 // - StringBuilder.AppendLine ends lines with "\r\n" (Windows); the hand-written "\n" pieces stay "\n".
 // - "REM" anywhere a token may start begins a comment, also inside names ("remaining" -> comment).
 // - "-" followed by a digit lexes as a negative number literal, so "a = b-1" is "a = b" then "-1".
@@ -24,10 +29,12 @@
 // IsWhiteSpace per UTF-16 unit); columns and lengths are counted in UTF-16 units as in C#.
 #include "basic.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstring>
 #include <deque>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -826,12 +833,17 @@ private:
 const struct { const char* name; const char* text; } kHelpers[] = {
 #include "basic_helpers.inc"
 };
+const struct { const char* name; const char* needs; const char* text; } kHelpersD18[] = {
+#include "basic_helpers_d18.inc"
+};
 
 struct Sym { VT type; std::string label; std::vector<int> dims; };
 
 class Emitter {
 public:
-    explicit Emitter(uint32_t start) : start_(start), cur_(start) {}
+    // ref: emit exactly what the reference emits. Otherwise (D-18) the emitted code is fixed where the
+    // reference's was wrong: lines the assembler cannot encode, and the string runtime.
+    Emitter(uint32_t start, bool ref) : start_(start), cur_(start), ref_(ref) {}
     std::vector<std::string> errors;
 
     std::string emit(const std::vector<Stmt*>& prog) {
@@ -853,9 +865,10 @@ public:
         if (printInt_) out += section("SHARED SUBROUTINES") + printIntSubroutine();
         if (!helpers_.empty()) {
             if (!printInt_) out += section("SHARED SUBROUTINES");
-            for (auto& h : helpers_)
-                for (auto& k : kHelpers)
-                    if (h == k.name) out += replaceAll(k.text, "\n", "\r\n");
+            for (auto& h : helpers_) {
+                if (ref_) { for (auto& k : kHelpers) if (h == k.name) out += replaceAll(k.text, "\n", "\r\n"); }
+                else for (auto& k : kHelpersD18) if (h == k.name) out += replaceAll(k.text, "\n", "\r\n");
+            }
         }
         if (!d_.empty() || printInt_) {
             out += section("DATA SECTION") + d_;
@@ -886,7 +899,64 @@ private:
     template <class... A> void D(const A&... a) { (put(d_, a), ...); d_ += "\r\n"; }
     template <class... A> void V(const A&... a) { (put(v_, a), ...); v_ += "\r\n"; }
 
-    void needHelper(const char* h) { for (auto& x : helpers_) if (x == h) return; helpers_.push_back(h); }
+    bool ref_;                                       // reference output (see the constructor)
+    std::vector<std::string> settings_;              // D-18: INK/FONT/LOCATE... variables declared so far
+
+    void needHelper(const char* h) {
+        for (auto& x : helpers_) if (x == h) return;
+        helpers_.push_back(h);
+        if (!ref_)   // D-18 routines share code: emit what this one calls too
+            for (auto& k : kHelpersD18)
+                if (!std::strcmp(k.name, h))
+                    for (std::string_view n = k.needs; !n.empty();) {
+                        size_t e = std::min(n.find(' '), n.size());
+                        needHelper(std::string(n.substr(0, e)).c_str());
+                        n.remove_prefix(std::min(e + 1, n.size()));
+                    }
+    }
+
+    // --- D-18: register classes. A temp is a 32-bit register (ABCD..YZAB) or a float one (F0..F15);
+    // conditions leave an 8-bit A. Instructions take operands of one width, so narrower uses name the
+    // temp's low registers (an address is the low 24 bits).
+    static bool isF(const std::string& r) { return r.size() >= 2 && r[0] == 'F' && r[1] >= '0' && r[1] <= '9'; }
+    static bool isR32(const std::string& r) { return r.size() == 4 && !isF(r); }
+    static std::string lo(const std::string& r, size_t n) { return r.size() > n && !isF(r) ? r.substr(r.size() - n) : r; }
+    std::string fit(const std::string& r, size_t n) { return ref_ ? r : lo(r, n); }
+    static std::string floatBitsHex(float f) { uint32_t u; std::memcpy(&u, &f, 4); return "0x" + hexN(u, 8); }
+
+    // r converted to the class t needs: 32-bit for integers and string addresses, float for floats.
+    std::string as(const std::string& r, VT t) {
+        bool wantF = t == VT::Float;
+        if (ref_ || (wantF ? isF(r) : isR32(r))) return r;
+        if (!isF(r) && !isR32(r)) {   // 8..24-bit: widen through the stack, the temp may contain r
+            std::string w = temp(VT::Integer);
+            L("    PUSH ", r);
+            L("    LD ", w, ", 0");
+            L("    POP ", lo(w, r.size()));
+            return as(w, t);
+        }
+        std::string d = temp(wantF ? VT::Float : VT::Integer);
+        L("    LD ", d, ", ", r);
+        if (wantF) {   // LD fr, rrrr reads the integer as unsigned: convert a negative one's magnitude
+            std::string ok = ".to_float_" + std::to_string(labels_++);
+            L("    SCP ", r, ", 0");
+            L("    JR GTE, ", ok);
+            L("    INV ", r);
+            L("    INC ", r);
+            L("    LD ", d, ", ", r);
+            L("    MUL ", d, ", 0xBF800000  ; -1.0");
+            L(ok);
+        }
+        release(r, VT::Integer);
+        return d;
+    }
+
+    // Loads each (source temp, input register) pair through the register stack: no input is overwritten
+    // before it is read, whichever temps the sources are.
+    void pass(const std::vector<std::pair<std::string, std::string>>& in) {
+        for (auto& [src, dst] : in) L("    PUSH ", lo(src, dst.size()));
+        for (size_t i = in.size(); i-- > 0;) L("    POP ", in[i].second);
+    }
 
     std::string temp(VT t) {
         auto& pool = t == VT::Float ? floatPool_ : intPool_;
@@ -896,7 +966,25 @@ private:
         int i = temps_++;
         return t == VT::Float ? floats[i % 16] : ints[i % 7];
     }
-    void release(const std::string& r, VT t) { (t == VT::Float ? floatPool_ : intPool_).push_back(r); }
+    void release(const std::string& r, VT t) {
+        if (ref_) { (t == VT::Float ? floatPool_ : intPool_).push_back(r); return; }
+        // D-18: only temps go back, each once (the reference pooled A/B too, and twice)
+        auto& pool = isF(r) ? floatPool_ : intPool_;
+        if ((isF(r) || isR32(r)) && std::find(pool.begin(), pool.end(), r) == pool.end()) pool.push_back(r);
+    }
+
+    // D-18: #DB text for s and its 0: quotes and control characters as numbers (a raw line break split
+    // the line, and the assembler has no escapes).
+    static std::string dbText(const std::string& s) {
+        std::string o;
+        bool open = false;
+        for (unsigned char c : s) {
+            bool plain = c >= 0x20 && c != '"';
+            if (plain != open || !plain) { if (open) o += '"'; if (!o.empty()) o += ", "; if (plain) o += '"'; open = plain; }
+            if (plain) o += char(c); else o += std::to_string(c);
+        }
+        return o + (open ? "\", 0" : o.empty() ? "0" : ", 0");
+    }
 
     static std::string varLabel(std::string_view name, VT t) {
         while (!name.empty() && (name.back() == '#' || name.back() == '$')) name.remove_suffix(1);
@@ -924,7 +1012,10 @@ private:
             for (int d : s.dims) n *= uint32_t(d + 1);   // C# int arithmetic: wraps
             total = int32_t(n * uint32_t(total));
         }
-        if (s.type == VT::String && init && !init->empty()) {
+        if (s.type == VT::String && init && !init->empty() && !ref_) {
+            V("    #DB ", dbText(*init));   // D-18: an assignment copies 16 bytes, so reserve at least 16
+            if (init->size() < 15) V("    #DB [", int(15 - init->size()), "] 0  ; Room for 16 bytes");
+        } else if (s.type == VT::String && init && !init->empty()) {
             std::string e = replaceAll(replaceAll(replaceAll(replaceAll(*init, "\"", "\\\""), "\n", "\\n"), "\r", "\\r"), "\t", "\\t");
             V("    #DB \"", e, "\", 0");
         } else if (s.type == VT::String) {
@@ -947,7 +1038,8 @@ private:
         if (it != strLits_.end()) return it->second;
         std::string label = ".string" + std::to_string(strings_++);
         D(label);
-        D("    #DB \"", replaceAll(s, "\"", "\"\""), "\", 0");
+        if (ref_) D("    #DB \"", replaceAll(s, "\"", "\"\""), "\", 0");
+        else D("    #DB ", dbText(s));
         return strLits_[s] = label;
     }
 
@@ -987,7 +1079,8 @@ private:
             case SK::Goto: case SK::Gosub: {
                 const char* op = s->k == SK::Goto ? "JP" : "CALL";
                 auto it = labelAddr_.find(s->name);
-                if (it != labelAddr_.end()) L("    ", op, " ", hexN(it->second, 6));
+                if (!ref_) L("    ", op, " .", s->name);   // D-18: the reference wrote its size estimate, without 0x
+                else if (it != labelAddr_.end()) L("    ", op, " ", hexN(it->second, 6));
                 else L("    ", op, " .", s->name, "  ; Forward reference");
                 cur_ += 7;
                 break;
@@ -995,6 +1088,15 @@ private:
             case SK::Return: L("    RET"); cur_ += 1; break;
             case SK::End: L("    RET  ; END of program"); cur_ += 2; break;
             case SK::Cls:
+                if (!ref_) {   // D-18: the page is computed before A is set (a temp may contain A)
+                    std::string p = e[0] ? expr(e[0], VT::Integer) : "";
+                    L("    LD A, 0x05  ; ClearVideoPage");
+                    L("    LD B, ", p.empty() ? "0" : lo(p, 1));
+                    L("    LD C, 0  ; Color 0");
+                    L("    INT 0x01, A");
+                    if (!p.empty()) release(p, VT::Integer);
+                    break;
+                }
                 L("    LD A, 0x05  ; ClearVideoPage");
                 if (e[0]) L("    LD B, ", expr(e[0], VT::Integer));
                 else L("    LD B, 0");
@@ -1002,8 +1104,10 @@ private:
                 L("    INT 0x01, A");
                 cur_ += 15;
                 break;
-            case SK::Wait: L("    WAIT ", expr(e[0], VT::Integer)); cur_ += 5; break;
-            case SK::Sleep: {
+            case SK::Wait: case SK::Sleep:
+                if (!ref_) { waitMs(e[0]); break; }   // D-18: WAIT takes only a constant
+                if (s->k == SK::Wait) { L("    WAIT ", expr(e[0], VT::Integer)); cur_ += 5; break; }
+                {
                 std::string ms = expr(e[0], VT::Integer);
                 L("    ; SLEEP ", ms, " ms");
                 L("    LD A, ", ms);
@@ -1018,7 +1122,7 @@ private:
                 std::string p = expr(e[0], VT::Integer);
                 L("    ; SCREEN ", p, " - set active video page");
                 L("    LD A, 0x03  ; ReadVideoAddress (placeholder)");
-                L("    LD B, ", p);
+                L("    LD B, ", fit(p, 1));
                 L("    INT 0x01, A");
                 cur_ += 10;
                 break;
@@ -1026,7 +1130,7 @@ private:
             case SK::Video:
                 { std::string p = expr(e[0], VT::Integer);
                 L("    LD A, 0x02  ; SetVideoPagesCount");
-                L("    LD B, ", p); }
+                L("    LD B, ", fit(p, 1)); }
                 L("    INT 0x01, A");
                 cur_ += 10;
                 break;
@@ -1034,15 +1138,24 @@ private:
                 bool ink = s->k == SK::Ink;
                 std::string c = expr(e[0], VT::Integer);
                 L("    ; ", ink ? "INK " : "PAPER ", c, ink ? " - set current color" : " - set background color");
-                L("    LD ", ink ? ".currentColor, " : ".currentPaper, ", c);
+                if (!ref_) store(ink ? ".currentColor" : ".currentPaper", c);
+                else L("    LD ", ink ? ".currentColor, " : ".currentPaper, ", c);
                 cur_ += 10;
                 break;
             }
             case SK::Input: input(s); break;
             case SK::Beep: beep(s); break;
-            case SK::Play: { std::string r = expr(e[0], VT::Integer); L("    PLAY ", r); release(r, VT::Integer); cur_ += 5; break; }
+            case SK::Play: { std::string r = expr(e[0], VT::Integer); L("    PLAY ", fit(r, 3)); release(r, VT::Integer); cur_ += 5; break; }
             case SK::LoadFont: {
                 std::string f = expr(e[0], VT::String), ad = expr(e[1], VT::Integer);
+                if (!ref_) {
+                    pass({{f, "BCD"}, {ad, "EFG"}});
+                    L("    LD A, 0x40  ; LoadPNGFont");
+                    L("    INT 0x04, A");
+                    release(f, VT::String);
+                    release(ad, VT::Integer);
+                    break;
+                }
                 L("    LD A, 0x40  ; LoadPNGFont");
                 L("    LD BCD, ", f);
                 L("    LD EFG, ", ad);
@@ -1059,8 +1172,11 @@ private:
             case SK::FontOutline: {
                 std::string c = expr(e[0], VT::Integer), p = expr(e[1], VT::Integer);
                 L("    ; FONT OUTLINE ", c, ", ", p);
-                L("    LD .currentFontOutlineColor, ", c);
-                L("    LD .currentFontOutlinePattern, ", p);
+                if (!ref_) { store(".currentFontOutlineColor", c); store(".currentFontOutlinePattern", p); }
+                else {
+                    L("    LD .currentFontOutlineColor, ", c);
+                    L("    LD .currentFontOutlinePattern, ", p);
+                }
                 release(c, VT::Integer);
                 release(p, VT::Integer);
                 cur_ += 15;
@@ -1072,7 +1188,7 @@ private:
                 L("    LD A, 0x30  ; ReadLayerVisibility");
                 L("    INT 0x01, A  ; Get current mask in A");
                 L("    LD B, 1");
-                L("    SL B, ", r, "  ; Shift 1 by layer number");
+                L("    SL B, ", fit(r, 1), "  ; Shift 1 by layer number");
                 if (show) L("    OR A, B  ; Set bit");
                 else { L("    INV B  ; Invert to create mask"); L("    AND A, B  ; Clear bit"); }
                 L("    LD B, A");
@@ -1085,7 +1201,7 @@ private:
             case SK::LayerVisibility: {
                 std::string r = expr(e[0], VT::Integer);
                 L("    LD A, 0x31  ; SetLayersVisibility");
-                L("    LD B, ", r);
+                L("    LD B, ", fit(r, 1));
                 L("    INT 0x01, A");
                 release(r, VT::Integer);
                 cur_ += 10;
@@ -1095,8 +1211,11 @@ private:
             case SK::Locate: {
                 std::string x = expr(e[0], VT::Integer), y = expr(e[1], VT::Integer);
                 L("    ; LOCATE ", x, ", ", y);
-                L("    LD .currentTextX, ", x);
-                L("    LD .currentTextY, ", y);
+                if (!ref_) { store(".currentTextX", x); store(".currentTextY", y); }
+                else {
+                    L("    LD .currentTextX, ", x);
+                    L("    LD .currentTextY, ", y);
+                }
                 release(x, VT::Integer);
                 release(y, VT::Integer);
                 cur_ += 15;
@@ -1107,12 +1226,14 @@ private:
                     if (!v || v->k != EK::Literal) continue;
                     if (v->type == VT::Integer) D("    #DB ", v->ival);
                     else if (v->type == VT::Float) D("    #DB ", netFloat(v->fval));
+                    else if (!ref_) D("    #DB ", dbText(v->s));
                     else D("    #DB \"", v->s, "\", 0");
                 }
                 break;
             case SK::Poke: {
                 std::string ad = expr(e[0], VT::Integer), v = expr(e[1], VT::Integer);
-                L("    LD (", ad, "), ", v, s->size == 1 ? "" : s->size == 16 ? ", 2" : s->size == 24 ? ", 3" : ", 4");
+                if (!ref_) L("    LD (", lo(ad, 3), "), ", lo(v, s->size == 1 ? 1 : s->size / 8));   // D-18: the value's low bytes
+                else L("    LD (", ad, "), ", v, s->size == 1 ? "" : s->size == 16 ? ", 2" : s->size == 24 ? ", 3" : ", 4");
                 release(ad, VT::Integer);
                 release(v, VT::Integer);
                 cur_ += 10;
@@ -1120,7 +1241,7 @@ private:
             }
             case SK::MemCopy: case SK::MemFill: {
                 std::string r0 = expr(e[0], VT::Integer), r1 = expr(e[1], VT::Integer), r2 = expr(e[2], VT::Integer);
-                L(s->k == SK::MemCopy ? "    MEMC " : "    MEMF ", r0, ", ", r1, ", ", r2);
+                L(s->k == SK::MemCopy ? "    MEMC " : "    MEMF ", fit(r0, 3), ", ", fit(r1, 3), ", ", fit(r2, s->k == SK::MemCopy ? 3 : 1));
                 release(r0, VT::Integer);
                 release(r1, VT::Integer);
                 release(r2, VT::Integer);
@@ -1131,10 +1252,34 @@ private:
         }
     }
 
+    // D-18: the reference wrote "LD .label, r" (no such form) to labels it never declared
+    void store(const std::string& var, const std::string& r) {
+        if (std::find(settings_.begin(), settings_.end(), var) == settings_.end()) {
+            settings_.push_back(var);
+            V(var);
+            V("    #DB 0, 0, 0, 0");
+        }
+        L("    LD (", var, "), ", r);
+    }
+    // SLEEP ms / WAIT n (both milliseconds, as WAIT n in the reference): WAIT 1 per unit
+    void waitMs(Expr* e) {
+        if (e && e->k == EK::Literal && e->type == VT::Integer && e->ival >= 0 && e->ival <= 0xFFFF) { L("    WAIT ", e->ival); return; }
+        std::string r = expr(e, VT::Integer), loop = ".wait_" + std::to_string(labels_++);
+        L(loop);
+        L("    SCP ", r, ", 0");
+        L("    JR LTE, ", loop, "_end");
+        L("    WAIT 1");
+        L("    DEC ", r);
+        L("    JR ", loop);
+        L(loop, "_end");
+        release(r, VT::Integer);
+    }
+
     void setting(Expr* e, const char* comment, const char* tail, const char* var) {
         std::string r = expr(e, VT::Integer);
         L(comment, r, tail);
-        L("    LD ", var, ", ", r);
+        if (!ref_) store(var, r);
+        else L("    LD ", var, ", ", r);
         release(r, VT::Integer);
         cur_ += 10;
     }
@@ -1175,6 +1320,10 @@ private:
         } else if (var->type == VT::Float) {
             L("    LD (", sym->label, "), ", r);
             cur_ += 7;
+        } else if (!ref_) {   // D-18: the 24-bit address, and a 0 at the end of the 16 bytes
+            L("    MEMC ", lo(r, 3), ", ", sym->label, ", 16  ; Copy string (16 bytes max)");
+            L("    LD ", lo(r, 1), ", 0");
+            L("    LD (", sym->label, " + 15), ", lo(r, 1), "  ; Keep it terminated");
         } else {
             L("    MEMC ", r, ", ", sym->label, ", 16  ; Copy string (16 bytes max)");
             cur_ += 10;
@@ -1184,7 +1333,26 @@ private:
 
     void print(Stmt* s) {
         auto& e = s->e;
-        if (s->at) {
+        if (s->at && !ref_) {   // D-18: every operand first, then the registers (a temp may overlap them)
+            std::vector<std::pair<std::string, std::string>> in = {{expr(e[pAtX], VT::Integer), "CD"}, {expr(e[pAtY], VT::Integer), "EF"}};
+            if (e[pFont]) in.push_back({expr(e[pFont], VT::Integer), "GHI"});
+            if (e[pColor]) in.push_back({expr(e[pColor], VT::Integer), "J"});
+            std::string text;   // as in the reference, only the last item reaches KLM
+            for (auto& it : s->items) { if (!text.empty()) release(text, VT::String); text = expr(it.e, VT::String); }
+            if (!text.empty()) in.push_back({text, "KLM"});
+            if (e[pFlags]) in.push_back({expr(e[pFlags], VT::Integer), "N"});
+            if (e[pMaxWidth]) in.push_back({expr(e[pMaxWidth], VT::Integer), "OP"});
+            if (e[pOutColor] && e[pOutPattern]) {
+                in.push_back({expr(e[pOutColor], VT::Integer), "Q"});
+                in.push_back({expr(e[pOutPattern], VT::Integer), "R"});
+            }
+            pass(in);
+            L("    LD A, 0x14  ; DrawText function");
+            if (!e[pFont]) L("    LD GHI, 0  ; Use default font");
+            if (!e[pColor]) L("    LD J, 15  ; Default color");
+            L("    INT 0x01, A");
+            for (auto& i : in) release(i.first, VT::Integer);
+        } else if (s->at) {
             std::string x = expr(e[pAtX], VT::Integer), y = expr(e[pAtY], VT::Integer);
             L("    LD A, 0x14  ; DrawText function");
             L("    LD CD, ", x);
@@ -1207,8 +1375,14 @@ private:
             L("    ; TAB(", expr(e[pTab], VT::Integer), ") - cursor positioning");
             for (auto& it : s->items) {
                 std::string r = expr(it.e, VT::String);
-                L("    LD A, 0x12  ; DrawString function");
-                L("    LD BCD, ", r);
+                if (!ref_) {
+                    pass({{r, "BCD"}});
+                    L("    LD A, 0x12  ; DrawString function");
+                    release(r, VT::String);
+                } else {
+                    L("    LD A, 0x12  ; DrawString function");
+                    L("    LD BCD, ", r);
+                }
                 L("    INT 0x01, A");
             }
             cur_ += 20;
@@ -1326,7 +1500,7 @@ private:
             std::string sr;
             if (step && floatLit(step)) {
                 sr = temp(VT::Float);
-                L("    LD ", sr, ", ", hexN(swappedBits(step->fval), 8), "  ; Load step value (float)");
+                L("    LD ", sr, ", ", ref_ ? hexN(swappedBits(step->fval), 8) : floatBitsHex(step->fval), "  ; Load step value (float)");
             } else if (step) sr = expr(step, VT::Float);
             else {
                 sr = temp(VT::Float);
@@ -1342,7 +1516,23 @@ private:
         L(endL);
     }
 
+    // D-18: an interrupt call whose operands are computed first and then passed (a temp may overlap the
+    // interrupt's registers, A included); fixed lines (function, page, defaults) follow.
+    void interrupt(std::vector<std::pair<std::string, std::string>> in, std::initializer_list<const char*> fixed, const char* intLine) {
+        pass(in);
+        for (const char* f : fixed) L(f);
+        L(intLine);
+        for (auto& i : in) release(i.first, VT::Integer);
+    }
+
     void plot(Stmt* s) {
+        if (!ref_) {
+            std::vector<std::pair<std::string, std::string>> in = {{expr(s->e[0], VT::Integer), "CD"}, {expr(s->e[1], VT::Integer), "EF"}};
+            if (s->e[2]) in.push_back({expr(s->e[2], VT::Integer), "G"});
+            if (s->e[2]) interrupt(in, {"    LD A, 0x20  ; Plot function", "    LD B, 0  ; Page 0"}, "    INT 0x01, A");
+            else interrupt(in, {"    LD A, 0x20  ; Plot function", "    LD B, 0  ; Page 0", "    LD G, 15  ; Default color"}, "    INT 0x01, A");
+            return;
+        }
         L("    LD A, 0x20  ; Plot function");
         L("    LD B, 0  ; Page 0");
         static const char* const regs[] = {"CD", "EF", "G"};
@@ -1367,6 +1557,16 @@ private:
         int n = circle ? 3 : 4;
         std::string r[4];
         for (int i = 0; i < n; ++i) r[i] = expr(s->e[i], VT::Integer);
+        if (!ref_) {
+            const char* fn = s->k == SK::Line ? "    LD A, 0x21  ; Line function"
+                           : s->k == SK::Rectangle ? (s->filled ? "    LD A, 0x06  ; DrawFilledRectangle" : "    LD A, 0x07  ; DrawRectangle")
+                           : s->filled ? "    LD A, 0x23  ; DrawFilledEllipse" : "    LD A, 0x22  ; Ellipse";
+            std::vector<std::pair<std::string, std::string>> in = {{r[0], "CD"}, {r[1], "EF"}, {r[2], "GH"}, {circle ? r[2] : r[3], "IJ"}};
+            if (s->e[n]) in.push_back({expr(s->e[n], VT::Integer), "K"});
+            if (s->e[n]) interrupt(in, {fn, "    LD B, 0  ; Page 0"}, "    INT 0x01, A");
+            else interrupt(in, {fn, "    LD B, 0  ; Page 0", "    LD K, 15  ; Default color"}, "    INT 0x01, A");
+            return;
+        }
         switch (s->k) {
             case SK::Line: L("    LD A, 0x21  ; Line function"); break;
             case SK::Rectangle: L("    LD A, ", s->filled ? "0x06  ; DrawFilledRectangle" : "0x07  ; DrawRectangle"); break;
@@ -1385,7 +1585,10 @@ private:
     }
 
     void input(Stmt* s) {
-        if (Expr* p = s->e[0]) {
+        if (Expr* p = s->e[0]; p && !ref_)
+            interrupt({{expr(p, VT::String), "EFG"}}, {"    LD A, 0x12  ; DrawString", "    LD BCD, 0  ; Default font", "    LD HI, 0  ; X",
+                       "    LD JK, 0  ; Y", "    LD L, 15  ; Color", "    LD M, 0  ; Page"}, "    INT 0x01, A");
+        else if (p) {
             std::string r = expr(p, VT::String);
             L("    LD A, 0x12  ; DrawString");
             L("    LD BCD, 0  ; Default font");
@@ -1402,7 +1605,10 @@ private:
         L("    LD A, 0x01  ; ReadKeyboardBuffer");
         L("    INT 0x02, A  ; Read character into A");
         L("    LD (", v.label, "), A");
-        if (var->type == VT::String) {
+        if (var->type == VT::String && !ref_) {   // D-18: the reference loaded the byte instead of storing 0
+            L("    LD B, 0  ; Null terminator");
+            L("    LD (", v.label, " + 1), B");
+        } else if (var->type == VT::String) {
             L("    LD B, (", v.label, " + 1)");
             L("    LD B, 0  ; Null terminator");
         }
@@ -1411,8 +1617,8 @@ private:
 
     void beep(Stmt* s) {
         std::string dur = expr(s->e[0], VT::Float), pitch = expr(s->e[1], VT::Float);
-        std::string vol = s->e[2] ? expr(s->e[2], VT::Float) : "F2";
-        if (!s->e[2]) L("    LD F2, 0x3F000000  ; 0.5 (default volume)");
+        std::string vol = s->e[2] ? expr(s->e[2], VT::Float) : ref_ ? "F2" : temp(VT::Float);   // D-18: F2 may be dur or pitch
+        if (!s->e[2]) L("    LD ", vol, ", 0x3F000000  ; 0.5 (default volume)");
         std::string snd = ".beep_sound_" + std::to_string(labels_++);
         D(snd);
         D("    #DB 0x00, 0x00  ; Flags: no optional parameters");
@@ -1430,13 +1636,20 @@ private:
         L("    PLAY XYZ");
         release(dur, VT::Float);
         release(pitch, VT::Float);
-        if (s->e[2]) release(vol, VT::Float);
+        if (s->e[2] || !ref_) release(vol, VT::Float);
         cur_ += 30;
     }
 
     void sprite(Stmt* s) {
         std::string r[5];
         for (int i = 0; i < 5; ++i) r[i] = expr(s->e[i], VT::Integer);
+        if (!ref_) {
+            std::vector<std::pair<std::string, std::string>> in = {{r[2], "BCD"}, {r[0], "EF"}, {r[1], "GH"}, {r[3], "IJ"}, {r[4], "KL"}};
+            if (s->e[5]) in.push_back({expr(s->e[5], VT::Integer), "M"});
+            if (s->e[5]) interrupt(in, {"    LD A, 0x10  ; DrawSpriteToVideoPage"}, "    INT 0x01, A");
+            else interrupt(in, {"    LD A, 0x10  ; DrawSpriteToVideoPage", "    LD M, 0  ; Default page 0"}, "    INT 0x01, A");
+            return;
+        }
         std::string page = s->e[5] ? expr(s->e[5], VT::Integer) : "B";
         if (!s->e[5]) L("    LD B, 0  ; Default page 0");
         L("    LD A, 0x10  ; DrawSpriteToVideoPage");
@@ -1453,11 +1666,18 @@ private:
     }
 
     // --- expressions: each returns the register holding the result ---
-    std::string expr(Expr* x, VT t = VT::Integer) {
+    std::string expr(Expr* x, VT t = VT::Integer) { return as(value(x, t), t); }   // D-18: in the class t needs
+    std::string value(Expr* x, VT t) {
         if (!x) throw Thrown(kNullRef);
         switch (x->k) {
             case EK::Literal: {
-                std::string r = temp(t);
+                std::string r = temp(!ref_ && x->type == VT::String ? VT::Integer : t);
+                if (!ref_ && x->type != VT::String) {   // D-18: a constant in the register's own format
+                    float fv = x->type == VT::Float ? x->fval : float(x->ival);
+                    if (t == VT::Float) L("    LD ", r, ", ", floatBitsHex(fv));
+                    else L("    LD ", r, ", ", x->type == VT::Integer ? x->ival : fv > -2147483649.0f && fv < 2147483648.0f ? int32_t(fv) : 0);
+                    return r;
+                }
                 if (x->type == VT::Integer) { L("    LD ", r, ", ", x->ival); cur_ += 9; }
                 else if (x->type == VT::Float) { L("    LD ", r, ", ", hexN(swappedBits(x->fval), 8)); cur_ += 9; }
                 else { L("    LD ", r, ", ", allocString(x->s)); cur_ += 7; }
@@ -1466,6 +1686,7 @@ private:
             case EK::Variable: return variable(x, t);
             case EK::Binary: return binary(x, t);
             case EK::Unary: {
+                if (!ref_ && x->op != tMINUS) t = VT::Integer;   // D-18: INV has integer forms only
                 std::string o = expr(x->l, t), r = temp(t);
                 if (x->op == tMINUS) { L("    LD ", r, ", 0"); L("    SUB ", r, ", ", o); }
                 else { L("    LD ", r, ", ", o); L("    INV ", r); }
@@ -1474,8 +1695,12 @@ private:
             }
             case EK::Call: return call(x, t);
             case EK::Peek: {
-                std::string ad = expr(x->l, VT::Integer), r = temp(t);
-                L("    LD ", r, ", (", ad, ")", x->size == 1 ? "" : x->size == 16 ? ", 2" : x->size == 24 ? ", 3" : ", 4");
+                std::string ad = expr(x->l, VT::Integer), r = temp(ref_ ? t : VT::Integer);
+                if (!ref_) {   // D-18: a load as wide as the PEEK, into the temp's low bytes
+                    size_t n = x->size == 1 ? 1 : size_t(x->size / 8);
+                    if (n < 4) L("    LD ", r, ", 0");
+                    L("    LD ", lo(r, n), ", (", lo(ad, 3), ")");
+                } else L("    LD ", r, ", (", ad, ")", x->size == 1 ? "" : x->size == 16 ? ", 2" : x->size == 24 ? ", 3" : ", 4");
                 release(ad, VT::Integer);
                 cur_ += 10;
                 return r;
@@ -1505,22 +1730,26 @@ private:
             case EK::MouseX: case EK::MouseY: {
                 std::string r = temp(VT::Integer);
                 mouseRead("    INT 0x02, A  ; X in CD, Y in EF, buttons in I");
+                if (!ref_) { release(r, VT::Integer); return x->k == EK::MouseX ? "CD" : "EF"; }   // D-18: widened by as()
                 L("    LD ", r, x->k == EK::MouseX ? ", CD" : ", EF");
                 cur_ += 15;
                 return r;
             }
             case EK::MouseButton: {
                 std::string b = expr(x->l, VT::Integer), r = temp(VT::Integer);
+                if (!ref_) L("    PUSH ", lo(b, 1), "  ; Button number (the read changes A..J)");
                 mouseRead("    INT 0x02, A  ; Buttons in I");
                 L("    LD A, I  ; Button state");
-                L("    LD B, ", b, "  ; Button number");
+                if (!ref_) L("    POP B  ; Button number");
+                else L("    LD B, ", b, "  ; Button number");
                 L("    BIT A, B  ; Test bit");
                 L("    LD A, 1");
                 L("    JR NZ, .mouse_btn_", labels_);
                 L("    LD A, 0");
                 L(".mouse_btn_", labels_++);
-                L("    LD ", r, ", A");
                 release(b, VT::Integer);
+                if (!ref_) { release(r, VT::Integer); return "A"; }   // D-18: widened by as()
+                L("    LD ", r, ", A");
                 cur_ += 20;
                 return r;
             }
@@ -1531,12 +1760,14 @@ private:
                     std::string r = temp(VT::String);
                     std::string label = ".inkey_str_" + std::to_string(labels_++);
                     D(label);
-                    D("    #DB 0  ; Null terminator");
+                    D(ref_ ? "    #DB 0  ; Null terminator" : "    #DB 0, 0  ; Character, null terminator");
+                    if (!ref_) L("    LD (", label, "), A  ; Store character");   // D-18: before r, which may contain A
                     L("    LD ", r, ", ", label);
-                    L("    LD (", label, "), A  ; Store character");
+                    if (ref_) L("    LD (", label, "), A  ; Store character");
                     cur_ += 10;
                     return r;
                 }
+                if (!ref_) return "A";   // D-18: widened by as()
                 std::string r = temp(VT::Integer);
                 L("    LD ", r, ", A");
                 cur_ += 5;
@@ -1555,6 +1786,20 @@ private:
 
     std::string variable(Expr* x, VT t) {
         Sym& v = symbol(x->s, x->type);
+        if (!ref_) {   // D-18: loaded in its own format (as() converts), an element through a 24-bit address
+            std::string r = temp(v.type);
+            if (!x->args.empty() && !v.dims.empty()) {
+                std::string idx = expr(x->args[0], VT::Integer), ad = v.type == VT::Float ? temp(VT::Integer) : r;
+                L("    MUL ", idx, ", ", v.type == VT::String ? 256 : 4);
+                L("    LD ", ad, ", ", v.label);
+                L("    ADD ", ad, ", ", idx);
+                if (v.type != VT::String) L("    LD ", r, ", (", lo(ad, 3), ")");   // a string element is its address
+                release(idx, VT::Integer);
+                if (ad != r) release(ad, VT::Integer);
+            } else if (v.type == VT::String) L("    LD ", r, ", ", v.label);
+            else L("    LD ", r, ", (", v.label, ")");
+            return r;
+        }
         std::string r = temp(t);
         if (!x->args.empty() && !v.dims.empty()) {
             int size = v.type == VT::String ? 256 : 4;
@@ -1585,18 +1830,44 @@ private:
                 std::string f = upper(x->s);
                 for (const char* n : {"LEFT", "RIGHT", "MID", "CHR", "STR", "STRING", "UCASE", "LCASE", "TRIM", "LTRIM", "RTRIM"})
                     if (f == n) return VT::String;
+                if (!ref_) return natural(f, x->args);
                 return f == "VAL" ? VT::Float : VT::Integer;
             }
             case EK::Binary:
                 if (x->op == tPLUS && (typeOf(x->l) == VT::String || typeOf(x->r) == VT::String)) return VT::String;
+                if (!ref_) return operands(x->op, x->l, x->r);
+                return VT::Integer;
+            case EK::Unary:
+                if (!ref_ && x->op == tMINUS) return typeOf(x->l);
                 return VT::Integer;
             default: return VT::Integer;
         }
     }
 
+    // D-18: the class a call computes in (the reference used the caller's, which some ops have no form for)
+    VT natural(const std::string& f, const std::vector<Expr*>& a) {
+        for (const char* n : {"FLOOR", "CEIL", "ROUND", "SIN", "COS", "TAN", "SQR", "POW", "PI", "E", "ABS", "SGN"})
+            if (f == n) return VT::Float;
+        if (f == "MIN" || f == "MAX")
+            for (Expr* e : a) if (typeOf(e) == VT::Float) return VT::Float;
+        return VT::Integer;
+    }
+    // D-18: the class a binary operator's operands are computed in (its result's, but compares give integers)
+    VT operands(Tk op, Expr* l, Expr* r) {
+        switch (op) {
+            case tPLUS: case tMINUS: case tMULTIPLY: case tDIVIDE: case tEQUAL: case tNOT_EQUAL: case tLESS_THAN:
+            case tGREATER_THAN: case tLESS_EQUAL: case tGREATER_EQUAL:
+                return typeOf(l) == VT::Float || typeOf(r) == VT::Float ? VT::Float : VT::Integer;
+            case tPOWER: return VT::Float;
+            default: return VT::Integer;
+        }
+    }
+    static bool comparison(Tk op) { return op == tEQUAL || op == tNOT_EQUAL || op == tLESS_THAN || op == tGREATER_THAN || op == tLESS_EQUAL || op == tGREATER_EQUAL; }
+
     std::string binary(Expr* b, VT t) {
         Tk op = b->op;
         bool logical = op == tAND || op == tOR || op == tXOR || op == tNAND || op == tNOR || op == tXNOR || op == tIMPLY;
+        if (!ref_ && !(op == tPLUS && typeOf(b) == VT::String)) t = operands(op, b->l, b->r);   // D-18: one class for both
         std::string left = expr(b->l, logical ? VT::Integer : t);
         bool leftBool = left == "A";
         bool saved = logical && leftBool;
@@ -1608,6 +1879,17 @@ private:
 
         auto arith = [&](const char* m) { L("    ", m, " ", res, ", ", right); cur_ += 5; release(right, t); };
         auto compare = [&](const char* cond, const char* name, const char* colon) {
+            if (!ref_) {   // D-18: the 0/1 goes into a 32-bit temp (A may be part of a live one)
+                std::string r = isR32(res) ? res : temp(VT::Integer);
+                L("    CP ", res, ", ", right);
+                L("    LD ", r, ", 1");
+                L("    JR ", cond, ", .", name, "_", labels_);
+                L("    LD ", r, ", 0");
+                L(".", name, "_", labels_++, colon);
+                release(right, t);
+                if (r != res) release(res, t);
+                return r;
+            }
             L("    CP ", res, ", ", right);
             L("    LD A, 1");
             L("    JR ", cond, ", .", name, "_", labels_);
@@ -1628,12 +1910,22 @@ private:
             case tMULTIPLY: arith("MUL"); break;
             case tDIVIDE: arith("DIV"); break;
             case tINT_DIVIDE:
+                if (!ref_) { arith("DIV"); break; }   // D-18: integers already; INT is the interrupt instruction
                 L("    DIV ", res, ", ", right);
                 L("    INT ", res, ", ", res);
                 cur_ += 10;
                 release(right, t);
                 break;
-            case tMODULO: arith("DIV"); break;
+            case tMODULO:
+                if (!ref_) {   // D-18: DIV's third operand takes the remainder (the reference divided)
+                    std::string rem = temp(VT::Integer);
+                    L("    DIV ", res, ", ", right, ", ", rem);
+                    release(right, t);
+                    release(res, t);
+                    return rem;
+                }
+                arith("DIV");
+                break;
             case tPOWER: arith("POW"); break;
             case tEQUAL: return compare("EQ", "eq", "");
             case tNOT_EQUAL: return compare("NE", "ne", "");
@@ -1661,7 +1953,15 @@ private:
             case tSHL: case tSHR: case tROL: case tROR: {
                 const char* m = op == tSHL ? "SL" : op == tSHR ? "SR" : op == tROL ? "RL" : "RR";
                 Expr* r = b->r;
-                if (r && r->k == EK::Literal && r->type == VT::Integer && r->ival >= 0 && r->ival <= 31)
+                if (!ref_) {   // D-18: the count by its low byte (evaluated twice as in the reference: same errors)
+                    if (r && r->k == EK::Literal && r->type == VT::Integer && r->ival >= 0 && r->ival <= 31) L("    ", m, " ", res, ", ", r->ival);
+                    else {
+                        std::string sh = expr(r, VT::Integer);
+                        L("    ", m, " ", res, ", ", lo(sh, 1));
+                        release(sh, VT::Integer);
+                    }
+                    release(right, t);
+                } else if (r && r->k == EK::Literal && r->type == VT::Integer && r->ival >= 0 && r->ival <= 31)
                     L("    ", m, " ", res, ", ", r->ival);
                 else {
                     std::string sh = expr(r, VT::Integer);   // the right operand, emitted a second time
@@ -1682,6 +1982,12 @@ private:
         D(buf);
         D("    #DB 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  ; 32 bytes for concatenated string");
         needHelper("StrCat");
+        if (!ref_) {
+            runtimeCall("StrCat", {{left, "BCD"}, {right, "EFG"}}, buf);
+            std::string r = temp(VT::String);
+            L("    LD ", r, ", ", buf);
+            return r;
+        }
         L("    PUSH A, U  ; Preserve registers");
         L("    LD FGH, ", left, "  ; First string address");
         L("    LD IJK, ", right, "  ; Second string address");
@@ -1711,9 +2017,119 @@ private:
         return r;
     }
 
+    // D-18: a call into the string runtime (basic_helpers_d18.inc). Saves A..U, passes the inputs, then either
+    // leaves the result in buf or (no buf) takes KLMN into a fresh temp, which the restore then skips.
+    std::string runtimeCall(const char* helper, const std::vector<std::pair<std::string, std::string>>& in,
+                            const std::string& buf, const char* preload = nullptr) {
+        needHelper(helper);
+        std::string res = buf.empty() ? temp(VT::Integer) : "";
+        std::vector<std::string> saved;   // A..U runs that are not res
+        for (int i = 0; i <= 20;) {
+            if (res.find(char('A' + i)) != std::string::npos) { ++i; continue; }
+            int j = i;
+            while (j < 20 && res.find(char('A' + j + 1)) == std::string::npos) ++j;
+            saved.push_back(i == j ? std::string(1, char('A' + i)) : std::string{char('A' + i), ',', ' ', char('A' + j)});
+            i = j + 1;
+        }
+        for (auto& s : saved) L("    PUSH ", s, "  ; Preserve registers");
+        pass(in);
+        if (preload) L(preload);
+        if (!buf.empty()) L("    LD HIJ, ", buf, "  ; Result buffer");
+        L("    CALL .", helper);
+        if (!res.empty()) L("    LD ", res, ", KLMN  ; Result");
+        for (size_t i = saved.size(); i-- > 0;) L("    POP ", saved[i], "  ; Restore registers");
+        for (auto& i : in) release(i.first, VT::Integer);
+        return res;
+    }
+    std::optional<std::string> stringCall(const std::string& name, const std::vector<Expr*>& a) {
+        size_t n = a.size();
+        auto str = [&](size_t i) { return expr(a[i], VT::String); };
+        auto num = [&](size_t i) { return expr(a[i], VT::Integer); };
+        auto bad = [&](const std::string& msg) { errors.push_back(msg); return temp(VT::Integer); };
+        auto toBuf = [&](const char* helper, const char* kind, const char* db, const std::vector<std::pair<std::string, std::string>>& in,
+                         const char* preload = nullptr) {
+            std::string buf = buffer(kind, db);
+            runtimeCall(helper, in, buf, preload);
+            return result(buf, 0);
+        };
+        if (name == "LEN" || name == "ASC") {
+            if (n != 1) return bad(name == "LEN" ? "LEN requires 1 argument" : "ASC requires 1 argument");
+            return runtimeCall(name == "LEN" ? "StrLen" : "StrAsc", {{str(0), "BCD"}}, "");
+        }
+        if (name == "VAL") {
+            if (n != 1) return bad("VAL requires 1 argument");
+            return runtimeCall("StrVal", {{str(0), "BCD"}}, "");
+        }
+        if (name == "INSTR") {
+            if (n < 2 || n > 3) return bad("INSTR requires 2 or 3 arguments");
+            std::vector<std::pair<std::string, std::string>> in;
+            if (n == 3) in.push_back({num(0), "KLMN"});
+            std::string s1 = str(n - 2), s2 = str(n - 1);
+            in.push_back({s1, "BCD"});
+            in.push_back({s2, "EFG"});
+            return runtimeCall("StrInstr", in, "", n == 3 ? nullptr : "    LD KLMN, 1  ; Start position (default)");
+        }
+        if (name == "LEFT" || name == "RIGHT") {
+            bool left = name == "LEFT";
+            if (n != 2) return bad(left ? "LEFT$ requires 2 arguments" : "RIGHT$ requires 2 arguments");
+            std::string s = str(0), c = num(1);
+            return toBuf(left ? "StrLeft" : "StrRight", left ? "left" : "right", k32, {{s, "BCD"}, {c, "KLMN"}});
+        }
+        if (name == "MID") {
+            if (n < 2 || n > 3) return bad("MID$ requires 2 or 3 arguments");
+            std::string s = str(0), st = num(1);
+            if (n == 2) return toBuf("StrMid", "mid", k32, {{s, "BCD"}, {st, "KLMN"}}, "    LD OPQR, -1  ; Length: to the end");
+            std::string ln = num(2);
+            return toBuf("StrMid", "mid", k32, {{s, "BCD"}, {st, "KLMN"}, {ln, "OPQR"}});
+        }
+        if (name == "CHR") {
+            if (n != 1) return bad("CHR$ requires 1 argument");
+            return toBuf("StrChr", "chr", "    #DB 0, 0  ; 2 bytes for single character + null", {{num(0), "KLMN"}});
+        }
+        if (name == "STRING") {
+            if (n != 2) return bad("STRING$ requires 2 arguments");
+            std::string c = num(0), s = str(1);
+            return toBuf("StrString", "string", k32, {{c, "KLMN"}, {s, "EFG"}});
+        }
+        if (name == "UCASE" || name == "LCASE" || name == "TRIM" || name == "LTRIM" || name == "RTRIM") {
+            std::string lower = name;
+            for (char& c : lower) c = char(c | 32);
+            if (n != 1) return bad(name + "$ requires 1 argument");
+            std::string helper = "Str" + name.substr(0, 1) + lower.substr(1);
+            return toBuf(helper.c_str(), lower.c_str(), k32, {{str(0), "BCD"}});
+        }
+        if (name == "STR") {   // INT 0x05 IntToString / FloatToString; "" = .NET's "G" ("{0}" printed its braces)
+            if (n != 1) return bad("STR$ requires 1 argument");
+            bool fl = typeOf(a[0]) == VT::Float;
+            std::string v = expr(a[0], fl ? VT::Float : VT::Integer);
+            std::string buf = buffer("str", k32), fmt = allocString("");
+            L("    PUSH A, U  ; Preserve registers");
+            if (fl) {   // B = float register, CDE = format, FGH = target
+                L("    LD A, 0x01  ; FloatToString function");
+                L("    LD B, ", v.substr(1), "  ; Float register index");
+                L("    LD CDE, ", fmt, "  ; Format string");
+                L("    LD FGH, ", buf, "  ; Target buffer");
+            } else {    // BCDE = value, FGH = format, IJK = target
+                L("    LD BCDE, ", v, "  ; Integer value (before A, which it may contain)");
+                L("    LD A, 0x03  ; IntToString function");
+                L("    LD FGH, ", fmt, "  ; Format string");
+                L("    LD IJK, ", buf, "  ; Target buffer");
+            }
+            L("    INT 0x05, A  ; Convert");
+            L("    POP A, U  ; Restore registers");
+            release(v, fl ? VT::Float : VT::Integer);
+            return result(buf, 0);
+        }
+        return std::nullopt;
+    }
+
     std::string call(Expr* f, VT t) {
-        std::string res = temp(t);
         std::string name = upper(f->s);
+        if (!ref_) {
+            if (auto r = stringCall(name, f->args)) return *r;
+            t = natural(name, f->args);   // D-18: computed in its own class, as() converts
+        }
+        std::string res = temp(t);
         auto& a = f->args;
         auto n = a.size();
         // ABS(x) style: LD res, arg / OP res
@@ -1721,6 +2137,7 @@ private:
             if (n != 1) throw Thrown(err);
             std::string r = expr(a[0], argT);
             L("    LD ", res, ", ", r);
+            if (!ref_ && !std::strcmp(op, "INT")) { release(r, VT::Float); return; }   // D-18: LD truncates (INT is the interrupt)
             L("    ", op, " ", res);
             cur_ += 8;
         };
@@ -1755,12 +2172,21 @@ private:
             L("    RAND ", res);
             if (n > 0) {
                 std::string r = expr(a[0], VT::Integer);
+                if (!ref_) {   // D-18: no MOD instruction; DIV's third operand is the remainder
+                    std::string rem = temp(VT::Integer);
+                    L("    DIV ", res, ", ", r, ", ", rem);
+                    L("    INC ", rem);
+                    release(r, VT::Integer);
+                    release(res, VT::Integer);
+                    return rem;
+                }
                 L("    MOD ", res, ", ", r);
                 L("    INC ", res);
             }
             cur_ += 5;
         } else if (name == "PI" || name == "E") {
-            L("    LD ", res, ", ", hexN(swappedBits(name == "PI" ? 3.14159265358979323846f : 2.71828182845904523536f), 8));
+            float v = name == "PI" ? 3.14159265358979323846f : 2.71828182845904523536f;
+            L("    LD ", res, ", ", ref_ ? hexN(swappedBits(v), 8) : floatBitsHex(v));
             cur_ += 9;
         } else if (name == "LEN" || name == "ASC") {
             bool len = name == "LEN";
@@ -1905,7 +2331,7 @@ private:
     }
 
     std::string printIntSubroutine() {
-        std::string fmt = allocString("{0}");
+        std::string fmt = allocString(ref_ ? "{0}" : "");   // D-18: "{0}" printed its braces
         std::string s;
         for (const char* l : {".PrintInt", "    ; Input: BCDE contains the 32-bit integer to print",
                               "    ; Use a fixed temporary buffer for string conversion", "    PUSH A, M  ; Save registers",
@@ -1924,7 +2350,7 @@ private:
 
 } // namespace
 
-BasicResult compileBasic(std::string_view source, uint32_t codeStart) {
+BasicResult compileBasic(std::string_view source, uint32_t codeStart, bool reference) {
     BasicResult res;
     res.runAddress = codeStart;
     std::string& log = res.log;
@@ -1952,7 +2378,7 @@ BasicResult compileBasic(std::string_view source, uint32_t codeStart) {
         if (prog.empty()) { log += "Parser error: No statements found in program\n"; ++res.errors; }
         for (auto& e : parseErrors) { log += "Parser error at line " + std::to_string(e.line) + ": " + e.text + "\n"; ++res.errors; }
 
-        Emitter em(codeStart);
+        Emitter em(codeStart, reference);
         std::string text = em.emit(prog);
         log += "Parsed " + std::to_string(prog.size()) + " statements\n";
         list("  - ");
