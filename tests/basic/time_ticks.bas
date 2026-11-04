@@ -1,0 +1,4 @@
+t = TIME
+u = TICKS
+v = TIME + TICKS
+PRINT TIME

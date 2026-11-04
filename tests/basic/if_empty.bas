@@ -1,0 +1,5 @@
+x = 1
+IF x THEN
+END IF
+IF x THEN ENDIF
+IF x THEN

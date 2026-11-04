@@ -1,0 +1,7 @@
+BEEP 0.5, 440.0
+BEEP 1, 880, 0.8
+x# = 0.2
+BEEP x#, x# * 2.0, x#
+PLAY 0x20000
+PLAY x
+BEEP 1

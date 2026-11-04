@@ -1,0 +1,3 @@
+REPEAT
+  CIRCLE "a b", (((-n XNOR MIN(5, X) ROL -VARPTR(s$) MOD i) OR MOUSE Y) XNOR RIGHT(x, ((10) SHL MOUSE Y) ^ 2, NOT 0 ROL ABS() AND 0.25)), n
+UNTIL "a b"

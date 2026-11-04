@@ -1,0 +1,5 @@
+DIM
+DIM a
+DIM b(1
+DIM c[2]
+DIM 5(1)

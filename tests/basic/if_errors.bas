@@ -1,0 +1,6 @@
+x = 1
+IF x PRINT "a"
+IF THEN
+END IF
+ELSE
+ENDIF

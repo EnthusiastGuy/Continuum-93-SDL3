@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Conformance oracle: runs the reference C# CPU and writes test vectors for tests/conformance.cpp.
+       Not part of the shipped build. C93Ref points at the reference repository checkout. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <C93Ref Condition="'$(C93Ref)' == ''">$(MSBuildThisFileDirectory)..\..\..\Continuum-93</C93Ref>
+  </PropertyGroup>
+  <!-- The cc mode: the reference's C compiler unit tests, built in with CcHarness.cs replacing their harness (Cc.cs). -->
+  <ItemGroup>
+    <Compile Include="$(C93Ref)\ContinuumUnitTests\CCompilerTests\*.cs" Exclude="$(C93Ref)\ContinuumUnitTests\CCompilerTests\CTestHarness.cs" LinkBase="CCompilerTests" />
+    <PackageReference Include="xunit.assert" Version="2.4.2" />
+    <PackageReference Include="xunit.core" Version="2.4.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(C93Ref)\Continuum Emulator\Continuum Emulator.csproj" />
+  </ItemGroup>
+</Project>

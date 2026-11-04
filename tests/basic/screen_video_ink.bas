@@ -1,0 +1,9 @@
+SCREEN 1
+VIDEO 3
+INK 15
+PAPER 2
+x = 4
+INK x + 1
+PAPER x
+SCREEN x
+VIDEO x

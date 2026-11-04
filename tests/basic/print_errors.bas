@@ -1,0 +1,3 @@
+PRINT AT 1 2; "x"
+PRINT TAB 5; "x"
+PRINT AT 1, 2 "x"

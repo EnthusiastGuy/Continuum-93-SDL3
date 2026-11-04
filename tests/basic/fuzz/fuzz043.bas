@@ -1,0 +1,1 @@
+PLOT ASC(UCASE((X)), FIX(-RIGHT$()), POW("", -VARPTR(n))) AND PEEK((i)) <= (65535) SHL (POW() OR ROUND(-1, ("a b"))) OR PEEK32(s$) INSTR(ABS(32, MID$(NOT PEEK16(LEFT$(STR$(1)))), RTRIM())) XOR TAN(MID$(CEIL(31, "hi", "x\ny")), 255, 1e3) NOR -7 IMPLY ((arr) / SIN(RIGHT$(a[2], PEEK16(TIME)))) = (EXP(TIME)) ^ VARPTR(X), "hi" NAND 65535 XOR b ROR 0.25

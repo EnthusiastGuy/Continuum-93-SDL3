@@ -1,0 +1,10 @@
+FOR j = PEEK24(255) TO ((SIN()) * -t$)
+  LET X = (x < 0.25)
+  y = (0.25)
+  FONT (0.25)
+NEXT
+LET t$ = (-1 \ 2 / LTRIM(PEEK16(MID())) + NOT 10 SHL STRING() ROL (b) SHR ((TICKS) ROL "a b") \ (s$ NAND (t$)))
+CIRCLE FILLED -0 XOR 65535 ROL -"hi" MOD 32 OR b SHL VARPTR(t$), (0.25), ("x\ny" ROR "a b" MOD MOUSE Y = VARPTR(a) + 255 AND foo(0, g#, arr) <= (VARPTR(t$)) < -a XOR NOT s$ ROR PEEK16("a b") / "x\ny"), PEEK16(-1 NAND (2 + -1 NAND (i) ROR (Y)))
+LET arr = -7 SHL (CEIL(x[255]) ROR 32 / "")
+SPRITE Y = INKEY $, -1, NOT ((VARPTR(a)) ROR (INKEY $)) \ Y[PI] > (PEEK(i[-1]) SHL 31 AND NOT b[""] = t$ + "x\ny" ^ (COS()) SHL 3.0), 32 - ((1e3) ROL 10 MOD ("x\ny")) + (31 + b ^ VARPTR(x)), -(255)
+DIM X(TIME MOD NOT CHR$(255, MIN(MID$(), RTRIM(LCASE(RIGHT(INKEY, 0.25, 255), 65535, 255), (n), TIME))) SHR VARPTR(a) <> (ROUND(-("a b"), t$)) * MOUSE BUTTON 0, (VARPTR(t$)))

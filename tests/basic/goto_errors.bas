@@ -1,0 +1,3 @@
+GOTO
+GOSUB 10
+GOTO "x"

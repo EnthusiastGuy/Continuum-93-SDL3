@@ -1,0 +1,3 @@
+LET X = 31
+LET x = 1
+PLOT CEIL(255 < 3.0 XNOR 32 MOD INT(VARPTR(i), y)) > 2, NOT (i) SHR g# > SGN(a, 3.0) <= VARPTR(s$) XNOR X, 0.25

@@ -1,0 +1,12 @@
+a = 1 SHL 4
+b = 256 SHR 2
+c = 1 ROL 31
+d = 2 ROR 1
+s = 3
+e1 = a SHL s
+f = a SHR (s + 1)
+g = a ROL s
+h = a ROR s
+i = a SHL 32
+j = a SHL -1
+k = a SHR (1 < 2)

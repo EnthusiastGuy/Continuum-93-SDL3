@@ -1,0 +1,7 @@
+SPRITE 10, 20, 0x10000, 8, 8
+SPRITE 10, 20, 0x10000, 8, 8, 1
+x = 1
+SPRITE x, x, x, x, x, x
+LOCATE 5, 6
+LOCATE x, x + 1
+SPRITE 1, 2, 3

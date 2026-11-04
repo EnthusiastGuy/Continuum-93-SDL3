@@ -1,0 +1,7 @@
+x = 1 2
+THEN
+TO
+NEXT
+WEND
+UNTIL 1
+STEP

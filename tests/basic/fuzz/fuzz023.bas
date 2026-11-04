@@ -1,0 +1,5 @@
+PAPER 255
+SPRITE MAX(-INT(10) ^ -1.5) > NOT VARPTR(b) <> PI IMPLY "x\ny" + (INSTR(MOUSE X, (-2.5), (255)) OR 1 XNOR "hi" AND NOT y) ROL E, (((65535) >= y ROR "") - NOT PI > INSTR() AND -(2)) IMPLY PEEK(5 = NOT TICKS \ LEFT$(VARPTR(b), FLOOR(s$, NOT ASC(-ROUND(-x[2]), s$, 0)))), INKEY, PEEK24(3.0 - VARPTR(x) SHL PEEK(31) + PEEK16((0.25) XOR 31)), ASC(RIGHT(1e3) + -PEEK24(INKEY $)) SHR (t$ XNOR foo() / 32 SHL NOT x) / NOT ASC(0 <> VARPTR(b) SHL 0), b
+LET a = s$ = arr
+Y = (i[1.5])
+FONT COLOR arr - (31) SHR 31 <= 1e3 AND VARPTR(x)

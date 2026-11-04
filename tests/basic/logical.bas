@@ -1,0 +1,9 @@
+a = 1
+b = 0
+c = a AND b
+d = a OR b
+e1 = a XOR b
+f = a NAND b
+g = a NOR b
+h = a XNOR b
+i = a IMPLY b

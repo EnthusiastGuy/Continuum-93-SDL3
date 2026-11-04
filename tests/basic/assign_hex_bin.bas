@@ -1,0 +1,6 @@
+a = 0xFF
+b = 0X10
+c = 0b1010
+d = 0B11
+e1 = 0xFFFFFFFF
+f = 0x7FFFFFFF

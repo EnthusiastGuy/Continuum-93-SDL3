@@ -1,0 +1,17 @@
+# LF everywhere, on every OS, regardless of core.autocrlf.
+* text=auto eol=lf
+# Windows scripts keep CRLF (cmd.exe needs it).
+*.cmd text eol=crlf
+*.bat text eol=crlf
+# Test inputs whose exact bytes matter (CRLF, BOM, encodings) are never converted.
+tests/cc/** -text
+tests/asm/** -text
+tests/basic/** -text
+tests/programs/** -text
+# Binary data.
+*.png binary
+*.wav binary
+*.ogg binary
+*.font binary
+# Guest data (programs, fonts, OS sources) is the reference content byte for byte; guests read it as files.
+Data/** -text

@@ -1,0 +1,6 @@
+FOR i = 1 TO 10
+  PRINT i
+NEXT i
+FOR j = 0 TO 5 STEP 2
+  PRINT j
+NEXT
