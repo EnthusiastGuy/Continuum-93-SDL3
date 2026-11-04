@@ -2,10 +2,11 @@
 //   Emulator/Interpreter/Assembler.cs (Assembler, CLine, AsmArgument), Interpret.cs, InterpretArguments.cs,
 //   DBArgument.cs, CodeBlockManager.cs, Emulator/DataConverter.cs (number parsing, #DB byte sizes),
 //   Mnemonics/Mnemonic.cs (lookups); the encoding table asm_ops.inc is generated from Mnem.OPS.
-// Output is byte-identical to the reference (tests/oracle --asm, conformance --asm). Reproduced quirks:
-//  - An instruction is matched by its "general form" text ("LD r,(rrr,nnn)"); an unknown form emits only
-//    the primary opcode byte (D-9: "LD (KLM), 1" emits 0x01 and nothing else). Unknown mnemonics emit 0x00.
-//  - Op is the text up to the first space, so "LD\tA,1" (tab, no space) is one unknown mnemonic -> 0x00; it is
+// Output is byte-identical to the reference (tests/oracle --asm, conformance --asm), except D-9:
+//  - An instruction is matched by its "general form" text ("LD r,(rrr,nnn)"). A line with an unknown form or
+//    mnemonic is an error and emits nothing (D-9; the reference emitted only the opcode byte, 0x00 for an
+//    unknown mnemonic, with no error). Reproduced quirks:
+//  - Op is the text up to the first space, so "LD\tA,1" (tab, no space) is one unknown mnemonic; it is
 //    uppercased only when a space follows, so a lone "nop" or "#org" is unknown. A lone '\r' stays in its line.
 //  - Label names are case-sensitive keys, their validity check is not.
 //  - "#include" (lowercase, first on the line) takes the rest of the line as the path, comment included.
@@ -15,7 +16,7 @@
 //    (SL, INT, SETVAR, ...) encodes a label as 0. "~x" in an absolute op resolves only if "~x" itself is a key.
 //  - Only '.'-labels work in #DB (24-bit); a missing one throws. #RUN takes numbers only (a label gives 0).
 //  - Label collection stops at the first duplicate/invalid/double label on a line; later labels are
-//    undeclared (encode 0, #DB throws). Only "Unrecognized parameter" lines count as errors.
+//    undeclared (encode 0, #DB throws). Only "Unrecognized parameter" lines (and D-9 lines) count as errors.
 //  - #DB: .NET regex CSV split (",1" loses the 1; text after a closing quote up to the next comma is dropped),
 //    no escapes, non-ASCII -> '?' per UTF-16 unit, number width from its spelling (0x0001 = 2 bytes, 00 = 2 bytes).
 //  - Code before the first #ORG takes addresses from 0 but is not emitted. Includes are appended at the end
@@ -739,12 +740,14 @@ struct Assembler {
                 if (i >= L.args.size() || fd.split) unfilled();   // letters left in the text
                 set(fd, argValue(L.args[i]));
             }
-        } else {
-            std::string_view g = trim(L.generalForm);
-            if (firstPass && !(g == "NOP" || g == "DEBUG" || g == "BREAK" || g == "RET" || g.empty())) {
-                warn(L.nr, "unknown operand format '" + L.generalForm + "'; only the opcode byte is emitted");
-                LOGW("Assembler: line %u: '%s' emits only its opcode byte (reference behaviour, see D-9)", L.nr, std::string(trim(L.text)).c_str());
-            }
+        } else if (std::string_view g = trim(L.generalForm); !L.error && !(g == "NOP" || g == "DEBUG" || g == "BREAK" || g == "RET" || g.empty())) {
+            // D-9: the reference silently emitted only the opcode byte here, which swallowed the next instruction
+            L.data.clear();
+            std::string shape(trim(std::string_view(L.generalForm).substr(L.op.size())));
+            if (firstPass)
+                r.errors.push_back({L.nr, "'" + std::string(trim(L.text)) + "': " +
+                    (T.ops.count(L.op) ? "no " + L.op + " form takes " + (shape.empty() ? "zero operands" : "operands " + shape)
+                                       : "unknown mnemonic " + L.op)});
         }
         gap += uint32_t(L.data.size());
     }

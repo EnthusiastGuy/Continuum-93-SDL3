@@ -39,7 +39,7 @@
 		LD BCD, .CommandBuffer
 		DEC YZ
 		ADD BCD, YZ
-		LD (BCD), 0
+		LD (BCD), 0, 1
 		
 		INC X	;Refresh mark
 		
@@ -79,7 +79,7 @@
 		
 .PrintCommand
 		REGS 1
-		DR
+		;DR	; no longer an instruction
 		
 		LD A, 5
 		LD B, 1
@@ -96,7 +96,7 @@
 		
 		INT 1, A			; Draw text
 		PUSH AB
-		ER
+		;ER	; no longer an instruction
 		REGS 0
 		POP VW
 		RET

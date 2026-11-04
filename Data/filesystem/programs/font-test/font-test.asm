@@ -60,9 +60,9 @@
 
 .RepeatPath
 
-    //INT 0x01, A
+    ;INT 0x01, A
     INC L
-    //WAIT 10
+    ;WAIT 10
     CP L, 100
     JR NZ, .RepeatPath
 
@@ -74,7 +74,7 @@
     LD H, 0x00          ; border color
     LD I, 0b00000000    ; flags
 
-    //INT 0x01, A
+    ;INT 0x01, A
 
 
 
@@ -96,7 +96,7 @@
 
 
 .Repeat
-    //INT 0x01, A         ; Video/Scroll
+    ;INT 0x01, A          ; Video/Scroll
     WAIT 10
     JR .Repeat
 
