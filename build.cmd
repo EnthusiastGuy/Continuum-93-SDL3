@@ -5,10 +5,12 @@ rem   build debug      Debug   -> build\debug\continuum.exe (console attached)
 rem   build linux      Docker  -> build\linux-x64, build\linux-arm64 (glibc 2.36+: Raspberry Pi OS bookworm too)
 rem   build web        Docker  -> build\web (serve with COOP/COEP headers, docs\WEB.md)
 rem   build all        release + linux + web
+rem   build boot [x64^|x86]  Docker -> bootable PC stick images, dist\continuum93-boot-*.zip (docs\BOOT.md)
 setlocal EnableDelayedExpansion
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 if /i "%~1"=="linux" (call :linux & exit /b !errorlevel!)
+if /i "%~1"=="boot" (call :boot %2 & exit /b !errorlevel!)
 if /i "%~1"=="web" (call :web & exit /b !errorlevel!)
 set CONFIG=Release
 if /i "%~1"=="debug" set CONFIG=Debug
@@ -46,6 +48,17 @@ exit /b 0
 rem The named volume keeps Emscripten's compiled system libraries between runs.
 call :docked emscripten/emsdk:6.0.13 build/web "emcmake cmake -S . -B build/web -DCMAKE_BUILD_TYPE=Release" "-v continuum93-emcache:/emsdk/upstream/emscripten/cache"
 exit /b %errorlevel%
+
+:boot
+rem Each arch builds in its own container (x86 runs natively as linux/386); the volume keeps the kernel trees.
+for %%a in (amd64:x64 386:x86) do for /f "tokens=1,2 delims=:" %%p in ("%%a") do (
+    if "%~1"=="" (set "GO=1") else (set "GO=" & if /i "%~1"=="%%q" set "GO=1")
+    if defined GO (
+        docker build -q --platform linux/%%p -t continuum93-boot:%%p "%ROOT%\boot" >nul || exit /b 1
+        docker run --rm --platform linux/%%p -v "%ROOT%:/src" -v continuum93-boot:/cache continuum93-boot:%%p sh /src/boot/build.sh %%q || exit /b 1
+    )
+)
+exit /b 0
 
 rem :docked <image> <build dir> <configure command> <docker args>
 :docked

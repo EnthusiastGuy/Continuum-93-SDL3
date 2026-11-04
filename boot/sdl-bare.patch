@@ -1,0 +1,349 @@
+diff --git a/src/core/linux/SDL_evdev.c b/src/core/linux/SDL_evdev.c
+index fa43ee6..f700a8c 100644
+--- a/src/core/linux/SDL_evdev.c
++++ b/src/core/linux/SDL_evdev.c
+@@ -32,7 +32,9 @@
+ #include "SDL_evdev.h"
+ #include "SDL_evdev_kbd.h"
+ 
++#include <dirent.h>
+ #include <errno.h>
++#include <limits.h>
+ #include <fcntl.h>
+ #include <unistd.h>
+ #include <sys/ioctl.h>
+@@ -127,6 +129,7 @@ typedef struct SDL_EVDEV_PrivateData
+     SDL_evdevlist_item *first;
+     SDL_evdevlist_item *last;
+     SDL_EVDEV_keyboard_state *kbd;
++    bool scan_dev_input; // no udev and no device list given: scan /dev/input
+ } SDL_EVDEV_PrivateData;
+ 
+ static SDL_EVDEV_PrivateData *_this = NULL;
+@@ -156,6 +159,73 @@ static bool SDL_EVDEV_SetRelativeMouseMode(bool enabled)
+     return true;
+ }
+ 
++#ifndef SDL_USE_LIBUDEV
++/* No udev: scan /dev/input like the joystick fallback does, again whenever the directory
++   changes (devtmpfs updates its mtime on hotplug), and guess each device's class ourselves. */
++static void SDL_EVDEV_scan(void)
++{
++    static struct timespec last_mtime;
++    struct stat st;
++    SDL_evdevlist_item *item, *next;
++    struct dirent *entry;
++    DIR *dir;
++
++    if (stat("/dev/input", &st) < 0 ||
++        (st.st_mtim.tv_sec == last_mtime.tv_sec && st.st_mtim.tv_nsec == last_mtime.tv_nsec)) {
++        return;
++    }
++    last_mtime = st.st_mtim;
++
++    for (item = _this->first; item; item = next) {
++        next = item->next;
++        if (access(item->path, F_OK) < 0) {
++            char path[PATH_MAX];
++            SDL_strlcpy(path, item->path, sizeof(path)); // removal frees item->path
++            SDL_EVDEV_device_removed(path);
++        }
++    }
++
++    dir = opendir("/dev/input");
++    if (!dir) {
++        return;
++    }
++    while ((entry = readdir(dir)) != NULL) {
++        unsigned long props[NBITS(INPUT_PROP_MAX)] = { 0 };
++        unsigned long ev[NBITS(EV_MAX)] = { 0 };
++        unsigned long abs[NBITS(ABS_MAX)] = { 0 };
++        unsigned long keys[NBITS(KEY_MAX)] = { 0 };
++        unsigned long rel[NBITS(REL_MAX)] = { 0 };
++        char path[PATH_MAX];
++        int fd, devclass;
++
++        if (SDL_strncmp(entry->d_name, "event", 5) != 0) {
++            continue;
++        }
++        (void)SDL_snprintf(path, sizeof(path), "/dev/input/%s", entry->d_name);
++        for (item = _this->first; item && SDL_strcmp(item->path, path) != 0; item = item->next) {
++        }
++        if (item) {
++            continue; // already open
++        }
++        fd = open(path, O_RDONLY | O_CLOEXEC);
++        if (fd < 0) {
++            continue;
++        }
++        ioctl(fd, EVIOCGPROP(sizeof(props)), props);
++        ioctl(fd, EVIOCGBIT(0, sizeof(ev)), ev);
++        ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs)), abs);
++        ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys);
++        ioctl(fd, EVIOCGBIT(EV_REL, sizeof(rel)), rel);
++        close(fd);
++        devclass = SDL_EVDEV_GuessDeviceClass(props, ev, abs, keys, rel);
++        if (devclass & (SDL_UDEV_DEVICE_MOUSE | SDL_UDEV_DEVICE_KEYBOARD | SDL_UDEV_DEVICE_TOUCHSCREEN | SDL_UDEV_DEVICE_TOUCHPAD)) {
++            SDL_EVDEV_device_added(path, devclass);
++        }
++    }
++    closedir(dir);
++}
++#endif // !SDL_USE_LIBUDEV
++
+ static void SDL_EVDEV_UpdateKeyboardMute(void)
+ {
+     if (SDL_EVDEV_GetDeviceCount(SDL_UDEV_DEVICE_KEYBOARD) > 0) {
+@@ -212,7 +282,8 @@ bool SDL_EVDEV_Init(void)
+                     }
+                 }
+             } else {
+-                // TODO: Scan the devices manually, like a caveman
++                _this->scan_dev_input = true;
++                SDL_EVDEV_scan();
+             }
+         }
+ #endif // SDL_USE_LIBUDEV
+@@ -325,6 +396,12 @@ void SDL_EVDEV_Poll(void)
+ 
+     SDL_EVDEV_kbd_update(_this->kbd);
+ 
++#ifndef SDL_USE_LIBUDEV
++    if (_this->scan_dev_input) {
++        SDL_EVDEV_scan();
++    }
++#endif
++
+     mouse = SDL_GetMouse();
+ 
+     for (item = _this->first; item; item = item->next) {
+diff --git a/src/video/kmsdrm/SDL_kmsdrmdyn.c b/src/video/kmsdrm/SDL_kmsdrmdyn.c
+index b64670e..a98c46a 100644
+--- a/src/video/kmsdrm/SDL_kmsdrmdyn.c
++++ b/src/video/kmsdrm/SDL_kmsdrmdyn.c
+@@ -142,7 +142,7 @@ bool SDL_KMSDRM_LoadSymbols(void)
+ #define SDL_KMSDRM_SYM_OPT(rc, fn, params)  KMSDRM_##fn = (SDL_DYNKMSDRMFN_##fn)KMSDRM_GetSym(#fn, thismod, false);
+ #include "SDL_kmsdrmsym.h"
+ 
+-        if ((SDL_KMSDRM_HAVE_LIBDRM) && (SDL_KMSDRM_HAVE_GBM)) {
++        if (SDL_KMSDRM_HAVE_LIBDRM) { // without GBM: dumb-buffer mode, software rendering only
+             // all required symbols loaded.
+             SDL_ClearError();
+         } else {
+diff --git a/src/video/kmsdrm/SDL_kmsdrmdyn.h b/src/video/kmsdrm/SDL_kmsdrmdyn.h
+index 64cabb7..3557176 100644
+--- a/src/video/kmsdrm/SDL_kmsdrmdyn.h
++++ b/src/video/kmsdrm/SDL_kmsdrmdyn.h
+@@ -34,6 +34,7 @@ extern "C" {
+ 
+ extern bool SDL_KMSDRM_LoadSymbols(void);
+ extern void SDL_KMSDRM_UnloadSymbols(void);
++extern int SDL_KMSDRM_HAVE_GBM; // 0: no libgbm (no Mesa), windows get a dumb-buffer framebuffer
+ 
+ // Declare all the function pointers and wrappers...
+ #define SDL_KMSDRM_SYM(rc, fn, params)        \
+diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.c b/src/video/kmsdrm/SDL_kmsdrmvideo.c
+index 22b1b43..9ce8a04 100644
+--- a/src/video/kmsdrm/SDL_kmsdrmvideo.c
++++ b/src/video/kmsdrm/SDL_kmsdrmvideo.c
+@@ -50,6 +50,8 @@
+ #include <dirent.h>
+ #include <errno.h>
+ #include <poll.h>
++#include <sys/ioctl.h>
++#include <sys/mman.h>
+ #include <sys/param.h>
+ #include <sys/stat.h>
+ #include <sys/utsname.h>
+@@ -634,6 +636,93 @@ static void KMSDRM_DeleteDevice(SDL_VideoDevice *device)
+     SDL_KMSDRM_UnloadSymbols();
+ }
+ 
++/* Dumb-buffer mode: with no libgbm (no Mesa), SDL renders in software straight into a mapped
++   DRM dumb buffer. Enough for firmware framebuffers (simpledrm) and any KMS driver. */
++static void KMSDRM_GetModeToSet(SDL_Window *window, drmModeModeInfo *out_mode);
++
++static void KMSDRM_DestroyWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window)
++{
++    SDL_WindowData *windata = window->internal;
++    int fd = _this->internal->drm_fd;
++
++    if (!windata) {
++        return;
++    }
++    if (windata->dumb_map) {
++        munmap(windata->dumb_map, windata->dumb_size);
++        windata->dumb_map = NULL;
++    }
++    if (windata->dumb_fb) {
++        KMSDRM_drmModeRmFB(fd, windata->dumb_fb);
++        windata->dumb_fb = 0;
++    }
++    if (windata->dumb_handle) {
++        struct drm_mode_destroy_dumb destroy = { windata->dumb_handle };
++        ioctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
++        windata->dumb_handle = 0;
++    }
++}
++
++static bool KMSDRM_CreateWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window, SDL_PixelFormat *format, void **pixels, int *pitch)
++{
++    SDL_WindowData *windata = window->internal;
++    SDL_DisplayData *dispdata = SDL_GetDisplayDriverDataForWindow(window);
++    int fd = _this->internal->drm_fd;
++    struct drm_mode_create_dumb create;
++    struct drm_mode_map_dumb map;
++    void *mapped;
++    int w, h;
++
++    KMSDRM_DestroyWindowFramebuffer(_this, window);
++    KMSDRM_GetModeToSet(window, &dispdata->mode);
++
++    // SDL sizes the surface from the window: never let it outgrow the buffer.
++    SDL_GetWindowSizeInPixels(window, &w, &h);
++    SDL_zero(create);
++    create.width = SDL_max(w, dispdata->mode.hdisplay);
++    create.height = SDL_max(h, dispdata->mode.vdisplay);
++    create.bpp = 32;
++    if (ioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
++        return SDL_SetError("KMSDRM: cannot create a dumb buffer: %s", strerror(errno));
++    }
++    windata->dumb_handle = create.handle;
++    windata->dumb_size = (size_t)create.size;
++
++    SDL_zero(map);
++    map.handle = create.handle;
++    if (KMSDRM_drmModeAddFB(fd, create.width, create.height, 24, 32, create.pitch, create.handle, &windata->dumb_fb) ||
++        ioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map) < 0 ||
++        (mapped = mmap(NULL, windata->dumb_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, map.offset)) == MAP_FAILED) {
++        SDL_SetError("KMSDRM: cannot map the dumb buffer: %s", strerror(errno));
++        KMSDRM_DestroyWindowFramebuffer(_this, window);
++        return false;
++    }
++    windata->dumb_map = mapped;
++    SDL_memset(mapped, 0, windata->dumb_size);
++
++    if (KMSDRM_drmModeSetCrtc(fd, dispdata->crtc.crtc->crtc_id, windata->dumb_fb, 0, 0,
++                              &dispdata->connector.connector->connector_id, 1, &dispdata->mode)) {
++        SDL_SetError("KMSDRM: cannot show the dumb buffer: %s", strerror(errno));
++        KMSDRM_DestroyWindowFramebuffer(_this, window);
++        return false;
++    }
++
++    *format = SDL_PIXELFORMAT_XRGB8888;
++    *pixels = mapped;
++    *pitch = (int)create.pitch;
++    return true;
++}
++
++static bool KMSDRM_UpdateWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int numrects)
++{
++    // Drivers that copy to the real framebuffer (simpledrm) need to hear what changed; the rest ignore it.
++    struct drm_mode_fb_dirty_cmd dirty;
++    SDL_zero(dirty);
++    dirty.fb_id = window->internal->dumb_fb;
++    ioctl(_this->internal->drm_fd, DRM_IOCTL_MODE_DIRTYFB, &dirty);
++    return true;
++}
++
+ static SDL_VideoDevice *KMSDRM_CreateDevice(void)
+ {
+     SDL_VideoDevice *device;
+@@ -687,16 +776,22 @@ static SDL_VideoDevice *KMSDRM_CreateDevice(void)
+     device->DestroyWindow = KMSDRM_DestroyWindow;
+     device->SetWindowFocusable = KMSDRM_SetWindowFocusable;
+ 
+-    device->GL_LoadLibrary = KMSDRM_GLES_LoadLibrary;
+-    device->GL_GetProcAddress = KMSDRM_GLES_GetProcAddress;
+-    device->GL_UnloadLibrary = KMSDRM_GLES_UnloadLibrary;
+-    device->GL_CreateContext = KMSDRM_GLES_CreateContext;
+-    device->GL_MakeCurrent = KMSDRM_GLES_MakeCurrent;
+-    device->GL_SetSwapInterval = KMSDRM_GLES_SetSwapInterval;
+-    device->GL_GetSwapInterval = KMSDRM_GLES_GetSwapInterval;
+-    device->GL_SwapWindow = KMSDRM_GLES_SwapWindow;
+-    device->GL_DestroyContext = KMSDRM_GLES_DestroyContext;
+-    device->GL_DefaultProfileConfig = KMSDRM_GLES_DefaultProfileConfig;
++    if (SDL_KMSDRM_HAVE_GBM) {
++        device->GL_LoadLibrary = KMSDRM_GLES_LoadLibrary;
++        device->GL_GetProcAddress = KMSDRM_GLES_GetProcAddress;
++        device->GL_UnloadLibrary = KMSDRM_GLES_UnloadLibrary;
++        device->GL_CreateContext = KMSDRM_GLES_CreateContext;
++        device->GL_MakeCurrent = KMSDRM_GLES_MakeCurrent;
++        device->GL_SetSwapInterval = KMSDRM_GLES_SetSwapInterval;
++        device->GL_GetSwapInterval = KMSDRM_GLES_GetSwapInterval;
++        device->GL_SwapWindow = KMSDRM_GLES_SwapWindow;
++        device->GL_DestroyContext = KMSDRM_GLES_DestroyContext;
++        device->GL_DefaultProfileConfig = KMSDRM_GLES_DefaultProfileConfig;
++    } else {
++        device->CreateWindowFramebuffer = KMSDRM_CreateWindowFramebuffer;
++        device->UpdateWindowFramebuffer = KMSDRM_UpdateWindowFramebuffer;
++        device->DestroyWindowFramebuffer = KMSDRM_DestroyWindowFramebuffer;
++    }
+ 
+ #ifdef SDL_VIDEO_VULKAN
+     device->Vulkan_LoadLibrary = KMSDRM_Vulkan_LoadLibrary;
+@@ -1738,7 +1833,9 @@ static void KMSDRM_GetModeToSet(SDL_Window *window, drmModeModeInfo *out_mode)
+     SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
+     SDL_DisplayData *dispdata = display->internal;
+ 
+-    if (window->fullscreen_exclusive) {
++    if (!SDL_KMSDRM_HAVE_GBM) {
++        *out_mode = dispdata->original_mode; // dumb-buffer mode keeps the mode it found (the firmware's)
++    } else if (window->fullscreen_exclusive) {
+         *out_mode = dispdata->fullscreen_mode;
+     } else {
+         drmModeModeInfo *mode = KMSDRM_GetClosestDisplayMode(display, window->windowed.w, window->windowed.h);
+@@ -1902,7 +1999,7 @@ static void KMSDRM_ReleaseVT(void *userdata)
+ 
+     for (i = 0; i < viddata->num_windows; i++) {
+         SDL_Window *window = viddata->windows[i];
+-        if (!(window->flags & SDL_WINDOW_VULKAN)) {
++        if (!(window->flags & SDL_WINDOW_VULKAN) && SDL_KMSDRM_HAVE_GBM) {
+             KMSDRM_DestroySurfaces(_this, window);
+         }
+     }
+@@ -1918,7 +2015,7 @@ static void KMSDRM_AcquireVT(void *userdata)
+     KMSDRM_drmSetMaster(viddata->drm_fd);
+     for (i = 0; i < viddata->num_windows; i++) {
+         SDL_Window *window = viddata->windows[i];
+-        if (!(window->flags & SDL_WINDOW_VULKAN)) {
++        if (!(window->flags & SDL_WINDOW_VULKAN) && SDL_KMSDRM_HAVE_GBM) {
+             KMSDRM_CreateSurfaces(_this, window);
+         }
+     }
+@@ -2144,7 +2241,17 @@ bool KMSDRM_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Propert
+         windata->double_buffer = true;
+     }
+ 
+-    if (!is_vulkan && !vulkan_mode) { // NON-Vulkan block.
++    if (!SDL_KMSDRM_HAVE_GBM) { // Dumb-buffer mode: become DRM master; the framebuffer comes with the window surface.
++        if (viddata->drm_fd < 0) {
++            viddata->drm_fd = open(viddata->devpath, O_RDWR | O_CLOEXEC);
++            if (viddata->drm_fd < 0) {
++                return SDL_SetError("Could not reopen %s", viddata->devpath);
++            }
++        }
++        KMSDRM_drmSetMaster(viddata->drm_fd);
++        dispdata->fullscreen_mode = dispdata->original_mode;
++        SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, dispdata->original_mode.hdisplay, dispdata->original_mode.vdisplay);
++    } else if (!is_vulkan && !vulkan_mode) { // NON-Vulkan block.
+ 
+         /* Maybe you didn't ask for an OPENGL window, but that's what you will get.
+            See following comments on why. */
+diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.h b/src/video/kmsdrm/SDL_kmsdrmvideo.h
+index 67ec518..c544197 100644
+--- a/src/video/kmsdrm/SDL_kmsdrmvideo.h
++++ b/src/video/kmsdrm/SDL_kmsdrmvideo.h
+@@ -177,6 +177,12 @@ struct SDL_WindowData
+ 
+     /* This dictates what approach we'll use for SwapBuffers. */
+     bool (*swap_window)(SDL_VideoDevice *_this, SDL_Window *window);
++
++    // Dumb-buffer mode (no GBM): the window framebuffer, mapped and scanned out as is.
++    uint32_t dumb_handle;
++    uint32_t dumb_fb;
++    void *dumb_map;
++    size_t dumb_size;
+ };
+ 
+ typedef struct KMSDRM_FBInfo

@@ -205,7 +205,7 @@ int crtTest() {
     Crt crt;
     std::vector<uint32_t> src(kVSize), dst;
     bool ok = true;
-    for (auto [w, h] : {std::pair{960, 540}, {1440, 810}, {1920, 1080}}) {
+    for (auto [w, h] : {std::pair{960, 540}, {1440, 810}, {1920, 1080}, {2560, 1440}, {3840, 2160}}) {   // up to 4K: boot images run at the panel's size
         crt.resize(w, h);
         dst.assign(size_t(w) * h, 0x123456);
         std::fill(src.begin(), src.end(), 0u);

@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -126,6 +127,8 @@ void pollInput(SDL_Window* window, SDL_Renderer* renderer) {
 #endif
     // Letterbox-aware; the reference divided by window/480 because it kept the window 16:9.
     SDL_RenderCoordinatesFromWindow(renderer, gx - float(wx), gy - float(wy), &lx, &ly);
+    int lw, lh;   // screenAspect makes the canvas 480 x lh: back to the guest's 270 lines
+    if (SDL_GetRenderLogicalPresentation(renderer, &lw, &lh, nullptr) && lh > 0) ly *= float(kH) / float(lh);
 
     static const SDL_GamepadButton kButtons[15] = {   // kPad* bit order
         SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
@@ -194,6 +197,10 @@ disableMouse=false
 # Shows the screen as a CRT monitor would: curved glass, scanlines, phosphor mask (true or false).
 crtFilter=true
 
+# The physical shape of the screen: auto (square pixels), 4:3, 5:4, 16:10, 16:9 or 21:9. For screen modes
+# the monitor stretches (a 4:3 mode on a wide panel). Shift+F11 cycles it and saves it here.
+screenAspect=auto
+
 # Points to the source file (.asm or .c) that will be automatically loaded and ran on boot.
 # The default is the dual-boot selector (Halcyon or Q OS); use Data\os\q.asm to boot Q OS directly.
 bootProgram=Data\os\boot\boot.c
@@ -216,6 +223,28 @@ logging=true
         s.kv[line.substr(0, eq)] = line.substr(eq + 1);
     }
     return s;
+}
+
+// Rewrites one key of init.cfg in place (appended if missing); the rest of the file is kept as written.
+void saveSetting(const std::filesystem::path& data, const std::string& key, const std::string& value) {
+    auto path = data / "init.cfg";
+    std::ifstream f(path);
+    std::string out, line;
+    bool done = false;
+    while (std::getline(f, line)) {
+        if (line.rfind(key + "=", 0) == 0) { line = key + "=" + value + (line.back() == 13 ? "\r" : ""); done = true; }
+        out += line + "\n";
+    }
+    if (!done) out += key + "=" + value + "\n";
+    f.close();
+    if (!(std::ofstream(path, std::ios::binary) << out)) LOGW("Settings: cannot write %s; %s not saved", path.string().c_str(), key.c_str());
+}
+
+// screenAspect values, in Shift+F11 order; "auto" means square pixels.
+const char* const kAspects[] = {"auto", "4:3", "5:4", "16:10", "16:9", "21:9"};
+float aspectValue(const std::string& s) {
+    float a = 0, b = 0;
+    return std::sscanf(s.c_str(), "%f:%f", &a, &b) == 2 && a > 0 && b > 0 ? a / b : 0;
 }
 
 } // namespace
@@ -253,6 +282,9 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (settings.str("crtFilter") != "false") video.setCrt(true);   // on unless turned off (D-34)
+    static const std::filesystem::path dataDir = data;
+    static std::string aspect = settings.str("screenAspect");
+    video.setAspect(aspectValue(aspect));
 #ifndef _WIN32   // Windows takes the multi-size icon from the exe's resources (continuum.rc)
     static const uint8_t kIconPng[] = {
 #include "icon_png.inc"
@@ -309,7 +341,13 @@ int main(int argc, char** argv) {
                 // (Back 8, Tab 9, Enter 13, Esc 27, Del 127...), auto-repeat included.
                 uint16_t c = uint16_t(e.key.key);
                 if (down && (c < 32 || (c >= 127 && c < 160)) && service::guestKeys()) inputChar(*machine, c);
-                if (down && !e.key.repeat && (e.key.scancode == SDL_SCANCODE_F11 ||
+                if (down && !e.key.repeat && e.key.scancode == SDL_SCANCODE_F11 && (e.key.mod & SDL_KMOD_SHIFT)) {
+                    int i = 0;   // the next shape; an unknown value counts as auto (i = 6 wraps to 4:3)
+                    while (i < 6 && aspect != kAspects[i]) ++i;
+                    aspect = kAspects[(i + 1) % 6];
+                    video.setAspect(aspectValue(aspect));
+                    saveSetting(dataDir, "screenAspect", aspect);
+                } else if (down && !e.key.repeat && (e.key.scancode == SDL_SCANCODE_F11 ||
                     (e.key.scancode == SDL_SCANCODE_RETURN && (e.key.mod & SDL_KMOD_ALT)))) {
                     bool full = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
                     SDL_SetWindowFullscreen(window, !full);

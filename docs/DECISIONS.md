@@ -316,3 +316,30 @@ Measured on the running reference and settled to its usual outcome, deterministi
   Correctly rounded like from_chars; out of range gives inf/0 as .NET does. The old double-then-float fallback is gone.
 - `CMAKE_OSX_DEPLOYMENT_TARGET 13.3`: the first macOS with float `std::to_chars`, which the .NET-style float
   formatting needs. Older Macs are not supported.
+
+## D-38 Bootable PC images: our own minimal Linux, no Mesa, no udev — DECIDED 2026-11-04 (user: "boot as fast as possible and be as small as possible"; keyboard, USB storage, mouse, gamepad)
+- x64 (UEFI + BIOS) and x86 (BIOS + 32-bit UEFI) stick images, `build boot`; Raspberry Pi later. docs/BOOT.md.
+- No distro and no Buildroot: Linux 6.18 LTS from `tinyconfig` + `boot/kernel.config`, all built in, initramfs
+  inside the kernel file (EFI stub: UEFI runs it with no bootloader; syslinux for BIOS). busybox init.
+  The x64 kernel file, everything included, is ~7 MB; kernel to /init 0.33 s, stick mounted at ~0.9 s (QEMU/KVM).
+- No GPU drivers or Mesa (tens of MB, per-vendor firmware): the firmware's framebuffer through simpledrm, SDL's
+  software renderer. The emulator composites on the CPU anyway.
+- SDL is patched for these images only (`boot/sdl-bare.patch`, applied to a separate SDL checkout; the desktop
+  builds are untouched): kmsdrm without libgbm gives a dumb-buffer window framebuffer; evdev without libudev
+  scans /dev/input and rescans on change. Both fill gaps SDL itself leaves (no software path, a "TODO" scan).
+- x86 is built with `-msse2 -mfpmath=sse` (Pentium 4 and later): x87 extended precision would change float results.
+- One FAT32 partition holds the boot files and `Data/` so the stick stays editable from Windows; logs go there too.
+- UEFI: `video=efifb:auto` in the built-in command line, so the EFI stub picks the largest GOP mode (the panel's
+  native one) instead of the firmware's boot mode, which was often small and 4:3: stretched by the monitor and
+  too few lines for the scanlines (user, 2026-11-04). Cost: the CPU renders at native size (CRT ~8 ms at 1080p; above 2.2 Mpx it runs at 1/2).
+
+## D-39 `screenAspect` for stretched screen modes; no CRT on the boot stick — DECIDED 2026-11-04 (user: "manually toggle it until we land on a proper ratio"; "for the boot Continuum, drop the crt filter")
+- Port addition, not in the reference. `screenAspect=auto|4:3|5:4|16:10|16:9|21:9` in init.cfg: the monitor's
+  physical shape. When a screen mode is stretched by the monitor (BIOS 1024x768 on a wide panel), the letterbox
+  canvas becomes 480 x lh with lh = 270 x aspect x outH / outW, so the picture comes out right on the glass.
+  `auto` (the default, and any value it cannot parse) is square pixels: the desktop builds are unchanged.
+- Shift+F11 cycles it and rewrites that one line of init.cfg (F11 alone still toggles fullscreen). Manual because
+  the monitor's scaling mode (stretch or keep aspect) is unknowable: EDID gives the panel's shape, not that.
+- The mouse maps back to 270 lines (main.cpp pollInput). The service view stays square (host pixels).
+- The boot stick's init.cfg is main.cpp's kDefaults with `crtFilter=false` (boot/build.sh extracts it): firmware
+  framebuffers can be large and the CPUs these sticks target small.

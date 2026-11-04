@@ -2,11 +2,41 @@
 
 Read this first in every session. Update it at the end of every work block.
 
-**Current phase:** 9 — packaging (phases 1–8 done; speed pass done, D-29)
-**Next action:** re-run the asm and BASIC suites on Windows (`conformance --asm`, `--basic`): float literals
-now parse with strtof (D-37); expect 129/129 and 341/341. Then run the linux-arm64 zip on a real Raspberry Pi
-(64-bit OS). The user publishes `dist/continuum93-macos-arm64.zip` and uploads `dist/web/`. Optional web
-follow-ups are in docs/WEB.md. macOS work is on branch `feature/macos` (from `main`), not committed yet.
+**Current phase:** 10 — boot images (D-38, docs/BOOT.md); phase 9 packaging done apart from its open checks below
+**Next action:** the user tries `dist/continuum93-boot-x64.zip` (and x86) on real PCs: write the .img to a stick,
+boot with Secure Boot off (if the picture is stretched: Shift+F11 until it looks right, D-39), then read `continuum93/logs/` (continuum.log, kernel.log) off the stick. Fix what real
+hardware shows (likely: GOP mode / speed on big screens, HDA card choice, laptop touchpads). Raspberry Pi image
+after that. Still open from phase 9: asm/BASIC suites on Windows after D-37 (expect 129/129, 341/341), the
+linux-arm64 zip on a real Pi. Branch `feature/bootimage`, not committed.
+
+### 2026-11-04 — boot images for PCs (D-38)
+- `build boot [x64|x86]` → `dist/continuum93-boot-<x64|x86>.zip` (7.5 / 8 MB): a 64 MB FAT32 stick image. Linux
+  6.18.60 from tinyconfig + `boot/kernel.config`, initramfs in the kernel (busybox init `boot/init`, the emulator,
+  glibc, libdrm, libasound + config, amixer), EFI stub for UEFI, syslinux for BIOS. Builds in Docker
+  (`boot/Dockerfile`, x86 as linux/386); kernel tree and SDL checkout in the `continuum93-boot` volume.
+- `boot/sdl-bare.patch` (SDL 3.4.20, boot builds only): kmsdrm dumb-buffer framebuffer when libgbm is missing;
+  evdev scans /dev/input when built without libudev.
+- Verified in QEMU 7.2/KVM (`boot/test/`): x64 UEFI + BIOS (syslinux), x86 BIOS + 32-bit UEFI → Halcyon up;
+  USB mouse (moves, clicks the dock's power button), USB keyboard (F1 → service mode), HDA audio (beep in the
+  captured wav), Halcyon's Shut down → "shut down cleanly", stick unmounted, VM powers off. Stick found on 5/5
+  repeated boots. Timing (x64): /init at 0.33 s, stick mounted 0.9 s. Halcyon reports ~640 MHz (x64) and
+  ~370–530 MHz (x86) under nested KVM.
+- Fixed on the way: CONFIG_BLOCK (tinyconfig drops it), LEDS for the PlayStation driver, SYSVIPC (ALSA dmix),
+  /etc/group (dmix's audio group), amixer unmute (ALSA starts muted), COMPAT_32BIT_TIME (32-bit glibc futex),
+  zstd -19 for the x86 kernel (a 32-bit zstd cannot do -22).
+- Real wide screen (user): picture stretched, no scanlines: the firmware's small 4:3 boot mode. Now
+  `video=efifb:auto` (largest GOP mode); QEMU switches to 2048x2048, letterboxed, scanlines back (x64 UEFI,
+  x86 UEFI32). CRT cost added to `conformance --crt`: 7.9 ms at 1080p; above 2.2 Mpx video.cpp already runs
+  the filter at 1/2 (1440p: 1280x720, 4K: 1920x1080), so no threading (user: keep it simple). BIOS
+  boots stay 1024x768 4:3 (user: do nothing for now; options if it comes back: EDID via vesadrm +
+  FIRMWARE_EDID and a pixel-aspect letterbox, or a manual aspect= line on the stick).
+- D-39: `screenAspect` in init.cfg, Shift+F11 cycles and saves it; boot sticks ship `crtFilter=false`. Verified in
+  QEMU BIOS (1024x768): 4 x Shift+F11 → 16:9, the picture fills the mode, the stick's init.cfg says
+  `screenAspect=16:9`, the mouse lands where expected (5 x mouse_move 97 91 → pointer at 485,455). Desktop
+  (Windows, D3D11) logs "square pixels (screenAspect=auto)". x64 and x86 images rebuilt.
+- Seen, not fixed: two ALSA underruns at start; once (before the futex fix, not reproduced since) the x86 init
+  did not find the stick within 10 s.
+- Not checked: real PCs, gamepads (no QEMU gamepad), PS/2 laptop keyboards, AC'97/USB audio, BOOTIA32 on a real tablet.
 
 ### 2026-11-04 — macOS build and package (D-37)
 - `./package-macos.sh` on an Apple silicon MacBook Air (macOS 26.6, Apple clang 17, CMake 4.5 from the .dmg,

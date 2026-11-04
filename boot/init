@@ -1,0 +1,39 @@
+#!/bin/busybox sh
+# PID 1 of the boot image: find the Continuum stick, run the emulator from it, power off when it quits.
+/bin/busybox --install -s /bin
+export PATH=/bin
+mount -t devtmpfs dev /dev
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mkdir -p /mnt/c93
+
+# The stick is the FAT partition holding Data/os. USB storage appears a moment after boot: retry for 10 s.
+found=
+for try in $(seq 100); do
+    for b in /sys/class/block/*; do
+        mount -t vfat -o noatime,flush /dev/${b##*/} /mnt/c93 2>/dev/null || continue
+        [ -d /mnt/c93/Data/os ] && { found=${b##*/}; break 2; }
+        umount /mnt/c93
+    done
+    sleep 0.1
+done
+if [ -z "$found" ]; then
+    echo "Continuum 93: no FAT partition with Data/os found. Shell:"
+    exec sh
+fi
+
+# Logs (the emulator's and the kernel's) land on the stick: continuum93/logs/.
+export XDG_STATE_HOME=/mnt/c93 HOME=/tmp
+mkdir -p /mnt/c93/continuum93/logs
+dmesg > /mnt/c93/continuum93/logs/kernel.log
+export LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/lib/i386-linux-gnu
+# ALSA starts every mixer muted at 0: open up the usual outputs on each card (alongside the emulator's start).
+for c in /dev/snd/controlC*; do
+    for s in Master PCM Speaker Headphone Front 'Line Out'; do amixer -q -c ${c##*C} sset "$s" 90% unmute 2>/dev/null; done
+done &
+export SDL_VIDEO_DRIVER=kmsdrm SDL_RENDER_DRIVER=software
+/c93/continuum
+
+umount /mnt/c93
+sync
+poweroff -f

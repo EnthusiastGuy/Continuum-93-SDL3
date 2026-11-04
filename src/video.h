@@ -26,6 +26,7 @@ public:
     SDL_Texture* frame(Machine& m); // the screen as a 480x270 texture (service view), instead of present
     void setLogical(bool on);       // letterboxed 480x270 canvas (normal view) or host pixels (service view)
     void setCrt(bool on);           // CRT look for the normal view
+    void setAspect(float screen);   // the monitor's physical shape (w/h), 0 = square pixels
     void shutdown();
     SDL_Renderer* renderer() const { return r_; }
 
@@ -46,6 +47,9 @@ private:
     std::vector<uint32_t> rgb_;      // CRT path: the composited 480x270 frame
     Crt crt_;
     bool crtOn_ = false;
+    bool logical_ = true;            // normal view: the letterboxed canvas is on
+    float aspect_ = 0;               // screenAspect; 0 = square pixels
+    int lh_ = 0;                     // the canvas height in use, 480 x lh_ (270 with square pixels)
     uint8_t palCache_[8][768];       // last palette sent per layer, to skip redundant uploads
     bool palBottom_[8]{};            // whether that palette was sent with index 0 opaque
     bool gpu_ = false;

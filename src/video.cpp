@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "log.h"
@@ -49,6 +50,15 @@ bool Video::initGpuLayers() {
 }
 
 void Video::present(Machine& m) {
+    // A screen mode the monitor stretches to `aspect_` has non-square pixels: a 480 x lh canvas, letterboxed
+    // in mode pixels, comes out 16:9 on the glass. Only recomputed when the mode or the setting changes.
+    int lh = kH;
+    if (int ow, oh; aspect_ > 0 && SDL_GetRenderOutputSize(r_, &ow, &oh) && ow > 0 && oh > 0)
+        lh = std::max(1, int(std::lround(kH * aspect_ * oh / ow)));
+    if (lh != lh_ && logical_) {
+        lh_ = lh;
+        SDL_SetRenderLogicalPresentation(r_, kW, lh_, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    }
     SDL_SetRenderDrawColor(r_, 0, 0, 0, 255);
     SDL_RenderClear(r_);
     drawLayers(m, crtOn_);
@@ -72,7 +82,15 @@ SDL_Texture* Video::frame(Machine& m) {
 }
 
 void Video::setLogical(bool on) {
+    logical_ = on;
+    lh_ = on ? kH : 0;   // present() reapplies screenAspect
     SDL_SetRenderLogicalPresentation(r_, on ? kW : 0, on ? kH : 0, on ? SDL_LOGICAL_PRESENTATION_LETTERBOX : SDL_LOGICAL_PRESENTATION_DISABLED);
+}
+
+void Video::setAspect(float screen) {
+    aspect_ = screen;
+    if (screen > 0) LOGI("Video: screen shape %.3f; the picture is shaped for a monitor that stretches the mode to it", screen);
+    else LOGI("Video: square pixels (screenAspect=auto)");
 }
 
 void Video::setCrt(bool on) {

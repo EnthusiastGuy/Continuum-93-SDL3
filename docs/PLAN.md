@@ -92,6 +92,7 @@ reference's `.ogg` files are **Opus**: libogg + libopus, static via FetchContent
 | 7 | Settings, fullscreen, gamepad, host cursor, shutdown | Feature parity with the reference's window/input |
 | 8 | Service mode / debugger | See DECISIONS D-2 |
 | 9 | Speed pass + packaging for all platforms | Benchmarks table filled; CI-style build on 3 OSes |
+| 10 | Boot images: a stick that boots a PC (x64, x86) straight into the emulator; Raspberry Pi later (D-38, docs/BOOT.md) | Boots in QEMU on UEFI and BIOS with video, keyboard, mouse, sound, shutdown; then on real PCs |
 
 ## Benchmarks
 
