@@ -19,6 +19,7 @@ fi
 V=$(sed -n 's/^project(Continuum93 VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
 mkdir -p dist
 rm -f dist/continuum93-windows-x64.zip dist/continuum93-linux-*.zip dist/continuum93-web.zip
+for z in dist/web/downloads/continuum93-macos-*.zip; do [ -f "$z" ] && cp "$z" dist/; done   # made on a Mac: keep it
 rm -rf dist/web
 
 pack() {   # pack <platform> <program>

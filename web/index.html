@@ -96,7 +96,10 @@
   // The machine runs threads, which browsers allow only on a cross-origin isolated page. The server should send
   // the two headers (.htaccess, _headers); where it cannot, coi-sw.js adds them, after one reload.
   var frame = document.getElementById('screen');
-  if (self.crossOriginIsolated || !('serviceWorker' in navigator) || sessionStorage.getItem('coi-reloaded')) {
+  // Hosts that answer a missing file with this page would nest it in its own screen without end: stop at one.
+  if (window.frameElement && window.frameElement.id === 'screen') {
+    document.body.textContent = 'Continuum 93 could not be found on this server (play/continuum.html is missing).';
+  } else if (self.crossOriginIsolated || !('serviceWorker' in navigator) || sessionStorage.getItem('coi-reloaded')) {
     frame.src = 'play/continuum.html';
     frame.addEventListener('load', function () { frame.contentWindow.focus(); });
   } else {
@@ -115,7 +118,8 @@
   document.querySelectorAll('.dl').forEach(function (a) {
     fetch(a.getAttribute('href'), { method: 'HEAD' }).then(function (r) {
       var n = r.ok && +r.headers.get('content-length');
-      if (!r.ok) { a.classList.add('missing'); a.querySelector('.size').textContent = 'not available yet'; return; }
+      // some hosts answer a missing file with their index page and 200: an HTML answer is no zip
+      if (!r.ok || /^text\/html/.test(r.headers.get('content-type') || '')) { a.classList.add('missing'); a.querySelector('.size').textContent = 'not available yet'; return; }
       if (n) a.querySelector('.size').textContent = (n / 1048576).toFixed(1) + ' MB';
     }).catch(function () {});
   });
