@@ -1,4 +1,5 @@
-// Continuum 93 BASIC compiler: text-identical port of the reference (Compilers/C93Basic). See basic.cpp.
+// Continuum 93 BASIC compiler: port of the reference (Compilers/C93Basic). See basic.cpp. Its code is fixed
+// where the reference's could not run (D-18); reference = true gives the reference's text exactly.
 #pragma once
 #include <cstdint>
 #include <string>
@@ -14,7 +15,7 @@ struct BasicResult {
 };
 
 // BasicCompiler.Compile(source, codeStartAddress) on a fresh compiler.
-BasicResult compileBasic(std::string_view source, uint32_t codeStart = 0x080000);
+BasicResult compileBasic(std::string_view source, uint32_t codeStart = 0x080000, bool reference = false);
 
 // float.ToString() of .NET 8 (en-US); also used by the service-mode disassembler.
 std::string netFloat(float f);
