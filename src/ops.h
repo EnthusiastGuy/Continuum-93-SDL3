@@ -1,5 +1,6 @@
 // Shared vocabulary for the instruction families (ops_*.inc; included by cpu.cpp and service/cpu_tracked.cpp only).
 #pragma once
+#include <cmath>
 #include <cstdint>
 #include <type_traits>
 
@@ -105,6 +106,17 @@ inline uint8_t subByte(const Machine& m, uint32_t ip) { return m.ram[(ip - 1) & 
 // Float <-> raw IEEE bits (immediates and stacks carry floats as bit patterns).
 inline uint32_t fbits(float v) { uint32_t b; std::memcpy(&b, &v, 4); return b; }
 inline float fromBits(uint32_t b) { float v; std::memcpy(&v, &b, 4); return v; }
+// A NaN made from non-NaN operands is 0xFFC00000 on x86 (the reference's hardware) but 0x7FC00000 on ARM
+// and may be either in WebAssembly; give it the x86 bits (D-33). Operand NaNs propagate alike everywhere.
+inline float x86Nan(float r, float a, float b = 0) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    (void)a; (void)b;
+    return r;
+#else
+    return std::isnan(r) && !std::isnan(a) && !std::isnan(b) ? fromBits(0xFFC00000u) : r;
+#endif
+}
+inline float fPow(float a, float b) { return x86Nan(std::pow(a, b), a, b); }
 
 // dest op= src for integer operands. F::apply<W>(m, a, b) returns the result and sets flags.
 // Operands are fetched in encoding order: destination first, then source.

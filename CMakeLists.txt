@@ -14,6 +14,15 @@ endif()
 
 option(C93_APP "Build the SDL app (OFF: CPU core + conformance runner only, no download)" ON)
 
+# Web (Emscripten): every object, SDL and the codecs included, needs shared memory for the CPU and APU
+# threads; the assemblers and compilers throw, so native wasm exceptions; musttail needs wasm tail calls.
+if(EMSCRIPTEN)
+  add_compile_options(-pthread -fwasm-exceptions -mtail-call)
+  # The machine is ~30 MB; the compilers and the C boot program want stack.
+  add_link_options(-pthread -fwasm-exceptions -mtail-call
+    -sINITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH -sSTACK_SIZE=4MB -sDEFAULT_PTHREAD_STACK_SIZE=2MB)
+endif()
+
 # --- SDL3, static, trimmed to what an 8-layer retro machine needs -------------
 if(C93_APP)
 include(FetchContent)
@@ -65,6 +74,7 @@ add_executable(continuum WIN32
   src/log.cpp
   src/audio.cpp
   src/audio_xsound.cpp
+  src/crt.cpp
   src/asm.cpp
   src/basic.cpp
   src/cc_gen.cpp
@@ -106,20 +116,35 @@ else()
   # -ffp-contract=off: no fused multiply-add (GCC's default on ARM), so float math matches .NET bit for bit.
   target_compile_options(continuum PRIVATE -Wall -Wextra -ffp-contract=off $<$<CONFIG:Release>:-O3 -flto>)
   target_link_options(continuum PRIVATE $<$<CONFIG:Release>:-flto>)
-  if(NOT APPLE)
+  if(NOT APPLE AND NOT EMSCRIPTEN)
     # glibc stays dynamic (static glibc breaks NSS/dlopen); the C++ runtime is baked in.
     target_link_options(continuum PRIVATE -static-libstdc++ -static-libgcc $<$<CONFIG:Release>:-s>)
   endif()
 endif()
 
-# Data/ (OS sources, filesystem) sits next to the exe, as in the original.
-add_custom_command(TARGET continuum POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
-    ${CMAKE_SOURCE_DIR}/Data $<TARGET_FILE_DIR:continuum>/Data)
+if(EMSCRIPTEN)
+  # continuum.html/.js/.wasm/.data: Data/ is packed into the .data file and mounted at /Data
+  # (SDL_GetBasePath() is "/").
+  # shortcut: files the guest saves live in memory and are gone on reload; mount IDBFS on /Data/filesystem to keep them.
+  set_target_properties(continuum PROPERTIES SUFFIX ".html")
+  target_link_options(continuum PRIVATE
+    -sPTHREAD_POOL_SIZE=4
+    --preload-file ${CMAKE_SOURCE_DIR}/Data@/Data
+    --shell-file ${CMAKE_SOURCE_DIR}/web/shell.html)
+  set_property(TARGET continuum APPEND PROPERTY LINK_DEPENDS ${CMAKE_SOURCE_DIR}/web/shell.html)
+else()
+  # Data/ (OS sources, filesystem) sits next to the exe, as in the original.
+  add_custom_command(TARGET continuum POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory   # not _if_different: that needs CMake 3.26
+      ${CMAKE_SOURCE_DIR}/Data $<TARGET_FILE_DIR:continuum>/Data)
+endif()
 endif()
 
 # --- Conformance runner (no SDL): replays tests/oracle vectors through the CPU core -------
-add_executable(conformance tests/conformance.cpp src/service/disasm.cpp src/service/cpu_tracked.cpp src/audio.cpp src/audio_xsound.cpp src/asm.cpp src/basic.cpp src/cc_gen.cpp src/cc_parse.cpp src/cc_pp.cpp src/cpu.cpp src/ints.cpp src/ints_fs.cpp src/ints_input.cpp src/ints_text.cpp src/ints_video.cpp src/log.cpp)
+add_executable(conformance tests/conformance.cpp src/crt.cpp src/service/disasm.cpp src/service/cpu_tracked.cpp src/audio.cpp src/audio_xsound.cpp src/asm.cpp src/basic.cpp src/cc_gen.cpp src/cc_parse.cpp src/cc_pp.cpp src/cpu.cpp src/ints.cpp src/ints_fs.cpp src/ints_input.cpp src/ints_text.cpp src/ints_video.cpp src/log.cpp)
+if(EMSCRIPTEN)
+  target_link_options(conformance PRIVATE -sNODERAWFS)   # runs under node and reads the vector files from disk
+endif()
 target_include_directories(conformance PRIVATE src)
 if(MSVC)
   target_compile_definitions(conformance PRIVATE _CRT_SECURE_NO_WARNINGS)

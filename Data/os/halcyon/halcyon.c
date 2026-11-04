@@ -45,6 +45,7 @@ int key_pressed(int k) { return c93_key_down(keys, k) && !c93_key_down(prev_keys
 int key_down(int k) { return c93_key_down(keys, k); }
 
 #include "hal_gfx.c"
+#include "hal_bench.c"
 #include "hal_backdrop.c"
 #include "hal_fx.c"
 #include "hal_wm.c"
@@ -441,6 +442,7 @@ int main(void)
         boot_splash();
         backdrop_row = SCREEN_H;
         toast("Welcome to Halcyon", ACC(9));
+        bench_start();
         if (mb->magic == BOOT_MAGIC && mb->reopen[0])
         {
             /* the last program overwrote the OS, which was rebuilt: show its folder again */
@@ -460,6 +462,7 @@ int main(void)
         reload_drawers();
         desk_dirty = win_dirty = 1;
         crt_on();
+        if (!cpu_mhz) bench_start();        /* measured once per cold start; a warm return keeps it */
         if (mb->last_result == 0) toast("Welcome back", ACC(9));
         else if (mb->last_result < 0) toast("The program could not be found", K_RED);
         else
@@ -477,6 +480,7 @@ int main(void)
 
     for (;;)
     {
+        bench_tick();                       /* before t0: Pulse's load leaves the measurement out */
         unsigned int t0 = c93_millis();
         now_ms = t0;
         frame++;

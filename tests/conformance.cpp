@@ -2,6 +2,7 @@
 //   conformance <vectors.txt> [mnemonic ...]     e.g. conformance build/vectors.txt ADD SUB
 //   conformance --input                          INT 2 (input) self-test with synthetic host input
 //   conformance --ldfill                         hand-checked LD ...,n cases (the oracle skips them)
+//   conformance --crt                            CRT filter self-check, and its cost per frame
 //   conformance --bench ["<condition>"|--tracked] instructions per second per mix [WATCHER armed | service mode's tracked loop]
 //   conformance --programs <programs.txt>        whole programs (oracle --programs)
 //   conformance --asm <asm.txt>                  assembler output per file (oracle --asm)
@@ -34,6 +35,7 @@
 #include "audio.h"
 #include "basic.h"
 #include "cc.h"
+#include "crt.h"
 #include "input.h"
 #include "ints.h"
 #include "machine.h"
@@ -195,6 +197,35 @@ int ldFill() {
         bad += !ok;
     }
     return bad ? 1 : 0;
+}
+
+// CRT filter: black stays black, the glass's corners are black, a white screen's centre scanline is
+// near white; then the time per frame at the sizes a window usually has.
+int crtTest() {
+    Crt crt;
+    std::vector<uint32_t> src(kVSize), dst;
+    bool ok = true;
+    for (auto [w, h] : {std::pair{960, 540}, {1440, 810}, {1920, 1080}}) {
+        crt.resize(w, h);
+        dst.assign(size_t(w) * h, 0x123456);
+        std::fill(src.begin(), src.end(), 0u);
+        crt.apply(src.data(), dst.data(), w * 4);
+        bool black = std::all_of(dst.begin(), dst.end(), [](uint32_t p) { return p == 0; });
+        std::fill(src.begin(), src.end(), 0xFFFFFFu);
+        crt.apply(src.data(), dst.data(), w * 4);
+        bool corners = !dst[0] && !dst[size_t(w) - 1] && !dst[size_t(h - 1) * w] && !dst.back();
+        uint32_t peak = 0;   // the brightest green around the middle
+        for (int y = h / 2 - h / 135; y <= h / 2 + h / 135; ++y)   // one phosphor triad: each colour once at full
+            for (int x = w / 2; x < w / 2 + 3; ++x) peak = std::max(peak, dst[size_t(y) * w + x] & 0xFF00);
+        bool bright = peak >= 0xF000;
+        auto t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < 30; ++i) crt.apply(src.data(), dst.data(), w * 4);
+        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / 30;
+        std::printf("%s crt %dx%d: black %s, corners %s, white centre %s; %.2f ms per frame\n", black && corners && bright ? "ok  " : "FAIL",
+                    w, h, black ? "ok" : "lit", corners ? "dark" : "lit", bright ? "ok" : "dim", ms);
+        ok = ok && black && corners && bright;
+    }
+    return ok ? 0 : 1;
 }
 
 // INT 2 self-test: synthetic host input through the same entry points main.cpp uses, checked
@@ -942,6 +973,7 @@ int main(int argc, char** argv) {
     if ((argc == 2 || argc == 3) && !std::strcmp(argv[1], "--bench")) return bench(argc == 3 ? argv[2] : nullptr);
     if (argc == 2 && !std::strcmp(argv[1], "--ldfill")) return ldFill();
     if (argc == 2 && !std::strcmp(argv[1], "--input")) return inputTest();
+    if (argc == 2 && !std::strcmp(argv[1], "--crt")) return crtTest();
     if (argc == 3 && !std::strcmp(argv[1], "--programs")) return programs(argv[2]);
     if (argc == 3 && !std::strcmp(argv[1], "--asm")) return asmTest(argv[2]);
     if (argc == 3 && !std::strcmp(argv[1], "--basic")) return basicTest(argv[2]);

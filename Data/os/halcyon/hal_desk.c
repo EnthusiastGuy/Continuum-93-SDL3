@@ -195,7 +195,14 @@ void draw_menubar(void)
     strcat(buf, num);
     int cw = txt_w(F_S, "00:00:00");
     txt(P_TOP, F_S, SCREEN_W - cw - 8, 3, N(15), buf);
-    txt(P_TOP, F_S, SCREEN_W - cw - 8 - txt_w(F_S, "16M RAM") - 12, 3, N(8), "16M RAM");
+    int ram_x = SCREEN_W - cw - 8 - txt_w(F_S, "16M RAM") - 12;
+    txt(P_TOP, F_S, ram_x, 3, N(8), "16M RAM");
+    if (cpu_mhz)
+    {
+        /* counts up while it is measured, in the accent colour, then settles */
+        fmt_mhz(buf, cpu_mhz);
+        txt(P_TOP, F_S, ram_x - txt_w(F_S, buf) - 12, 3, bench_slice >= 0 ? ACC(12) : N(8), buf);
+    }
 }
 
 void draw_menus(void)

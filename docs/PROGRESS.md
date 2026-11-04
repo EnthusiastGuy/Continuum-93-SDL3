@@ -3,10 +3,67 @@
 Read this first in every session. Update it at the end of every work block.
 
 **Current phase:** 9 — packaging (phases 1–8 done; speed pass done, D-29)
-**Next action:** release builds on Linux and macOS (`build.sh`; WSL Ubuntu here has GCC 15 but no
-cmake/ninja; installing them needs the user's sudo), then the Raspberry Pi. The non-Windows window icon
-(`SDL_SetWindowIcon` from the compiled-in `icon/window.png`) has not been compiled yet: check it there.
-Work lives on branch `feature/sdl3-port`.
+**Next action:** macOS: run `./package-macos.sh` on a Mac (or a GitHub Actions macOS runner) and fix what
+breaks; then run the linux-arm64 zip on a real Raspberry Pi (64-bit OS). The user uploads `dist/web/`. Optional web follow-ups are in
+docs/WEB.md (IDBFS saves, coi-serviceworker for GitHub Pages). Work lives on branch `feature/platforms`
+(from `main`).
+
+### 2026-11-04 — CRT fixes and the two-column site
+- CRT (D-34 updated): corners bend instead of being cut (per-axis bend); no moiré in small windows (scanline
+  depth and mask ease off below 3 px per source pixel). Checked: Windows 1440x810 screenshot, Q OS in the browser
+  at 1084x605 (zoomed: even faint lines, no bands), `--crt` on Windows and wasm.
+- Site: the machine on the left (as tall as the window allows), downloads + Continuum RX card + notes in a 330 px
+  column on the right; one column below 1000 px. Seen at 1440x810: everything visible without scrolling.
+
+### 2026-11-04 — packages and the website (D-36)
+- `package.cmd` / `package.sh` (build all, then zip in the emsdk container) → `dist/continuum93-<windows-x64|
+  linux-x64|linux-arm64|web>.zip` + `dist/web/` (the site). `package-macos.sh` for a Mac. Full run: 9 min.
+- Checked: each zip has 165 files (program, repo Data/, README, LICENSE), Linux binaries keep mode 755, no
+  init.cfg / serviceState / zz_ files; the web zip has the 4 files + `.htaccess` + `_headers`.
+- Site served locally both ways (scratchpad node server): with the headers, Halcyon runs in the iframe, sizes
+  show, macOS greyed "not available yet"; without them, coi-sw.js reloads once and the page is isolated.
+- `build.sh` was stored without its executable bit; fixed (`git add --chmod=+x`), as for the package scripts.
+- Not checked: package-macos.sh (no Mac), the real host (continuum93.tape-drive.xyz).
+
+### 2026-11-04 — CRT filter (D-34), processor speed in Halcyon (D-35), web mouse fix
+- CRT: `src/crt.cpp` (own MIT filter, CPU), `Video::presentCrt`, `crtFilter` in init.cfg, on by default (a
+  missing key = on; checked with an init.cfg without it). `conformance --crt`
+  (black stays black, corners dark, white centre bright, ms/frame) passes on Windows, Linux x64 and wasm:
+  ~4.4–4.9 ms at 1440x810. Looked at on Windows (direct3d11): curved, scanlines, rounded corners. Not looked at
+  in the browser (same code path).
+- Halcyon: `Data/os/halcyon/hal_bench.c` + top bar, Pulse, About. Measured 815 MHz natively (16 M runs in
+  1,178,296 ticks), 246–262 MHz in headless Chrome. Seen in Chrome: count-up, Pulse line, About line,
+  click-to-remeasure. cc oracle regenerated (542/542; old one kept as `build/cc.before-bench.txt`).
+- Web mouse bug fixed: the pointer landed at the wrong place (SDL's "global" mouse is page units); the web
+  build now reads `SDL_GetMouseState`. Checked: click at CSS (700,400) puts the guest pointer there.
+- Gotcha: a build copies Data/ only when the exe relinks; after editing only Data/, copy it by hand (or touch a
+  source) before testing.
+- Seen, not fixed (also in the unmodified Halcyon): About's big rainbow "HALCYON" title does not draw.
+
+### 2026-11-04 — Linux, Raspberry Pi and web builds (D-31, D-32)
+`build linux|web|all` in `build.cmd` and `build.sh`, through Docker (`docker/linux.Dockerfile`, emsdk 6.0.13).
+Code: the main loop is a `frame()` lambda over statics, so the browser can own the loop;
+`SDL_WINDOW_FILL_DOCUMENT`; `init.cfg` falls back to the built-in defaults when Data/ is read-only (was: the
+test card); json.h `Member` struct (libstdc++ 12); plain `copy_directory` (CMake 3.25 on bookworm). Page:
+`web/shell.html` (canvas in its own div: SDL 3.4.20 fill-document restore bug); docs/WEB.md.
+Verified:
+- Windows: rebuilt, boots Halcyon, closes cleanly; vectors 1072/1072, programs 44/44.
+- Linux x64 (in the container): programs 44, asm 132 + 5 D-9 (oracle paths rewritten to POSIX in
+  `build/asm-posix.txt`), cc 541, basic 228 + 113, disasm, xsound 0 differ, basicrun, watch, immediate, input:
+  all as Windows. Vectors: 373 of 103,487 wrong, all 1-ULP libm CBR/SIN/COS/TAN (D-31). Needs GLIBC_2.36,
+  links libc/libm only. Bench (clang 16): ADD 1036, loop 435, memory 523, CALL 814, C 488 M instr/s.
+  Under WSLg: OpenGL, audio, boots Halcyon; read-only Data/ → WARN + defaults, still boots.
+- Web: every suite as Linux when node runs *inside the emsdk container* (node on Windows mangles `C:\`
+  paths under NODERAWFS); same D-31 libm diffs. Bench (node): 160–216 M instr/s. Headless Chrome, driven over
+  DevTools: boot menu, Halcyon, Q OS via Right+Enter, F1 service mode, letterboxed to the page.
+- Linux arm64 (emulated in Docker): programs 44, asm 132 + 5 D-9, cc 541, xsound 0 differ. Vectors found
+  D-33 (ARM's default NaN bits: 24 SQR/ISQR/POW variants); fixed with `x86Nan`; after it, only 1-ULP
+  SIN/COS/TAN cases remain (D-31). Windows still 1072/1072, web unchanged after the fix.
+- Gotcha: run program suites with a fresh `C93_FS` copy (tests/programs.cmd), never two at once.
+- Not checked: the window icon on Linux (set without error, not looked at), the arm64 app on real hardware
+  (only the test runner ran, emulated), macOS at all, sound in the browser (device opens; not listened to).
+  Not re-run after D-33: the full arm64 vector set (only the float families) and the Linux x64 suites
+  (x86Nan compiles to nothing there).
 
 ### 2026-11-04 — the user's decisions applied
 D-24 (F1 exit resumes), D-17 (benchmark MHz = i486-class equivalent clock, ~800 MHz here), D-9 (unencodable
@@ -58,7 +115,8 @@ match. No device: `Audio: no output device (...); running silent`. No guest prog
 - [x] 7 Settings, fullscreen, gamepad, cursor, command line (`-help`, `-png2font`; D-28)
 - [x] 8 Service mode — wave 1 (framework, Emulator/Disassembler/Registers/Flags/Status, debugger) and
       wave 2 (every remaining window and popup, `docs/SERVICE.md`); D-23..D-27
-- [ ] 9 Speed pass (done, D-29), app icon (done), packaging on 3 OSes (Windows done; Linux, macOS, Pi open)
+- [ ] 9 Speed pass (done, D-29), app icon (done), builds: Windows, Linux x64/arm64, web (D-32) done;
+      macOS and a run on a real Pi open
 
 ### Phase 2 — instruction families (C# file → status)
 

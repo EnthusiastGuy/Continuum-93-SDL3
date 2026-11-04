@@ -492,6 +492,11 @@ void pulse_draw(Win *w, int x, int y, int cw, int ch)
     strcat(buf, num);
     strcat(buf, "%");
     txt(P_WIN, F_S, gx + 4, gy + 3, ACC(12), buf);
+    /* the processor, measured; a click on the chart measures it again */
+    if (bench_slice >= 0) strcpy(buf, "measuring...");
+    else if (cpu_mhz) { strcpy(buf, cpu_name); strcat(buf, "  "); fmt_mhz(num, cpu_mhz); strcat(buf, num); }
+    else buf[0] = 0;
+    txt(P_WIN, F_S, gx + 4, gy + 12, N(10), buf);
 
     /* uptime and dial */
     int secs = (int)(now_ms / 1000);
@@ -552,6 +557,14 @@ void pulse_draw(Win *w, int x, int y, int cw, int ch)
         strcat(buf, "   Layers 4   Colours 1024");
         txt(P_WIN, F_S, x, ly + 14, N(9), buf);
     }
+}
+
+int pulse_click(Win *w, int lx, int ly, int dbl, int right)
+{
+    int cw = w->w - RAIL_W - 8;
+    (void)dbl; (void)right;
+    if (lx < cw * 3 / 5 && ly >= 18 && ly < 74 && bench_slice < 0) bench_start();
+    return 0;
 }
 
 /* ================================================================ Calc */
@@ -843,17 +856,20 @@ void about_draw(Win *w, int x, int y, int cw, int ch)
     c93_fill_round_rect(P_WIN, x, y, cw, 44, N(1), 6);
     txt_rainbow(P_WIN, F_L, cx - 52, y + 6, "HALCYON", 1);
     txt_center(P_WIN, F_S, cx, y + 30, N(9), "version 1.0  -  a retro desktop");
-    static const char *lines[7] = {
+    char cpu[40];
+    if (cpu_mhz && bench_slice < 0) { strcpy(cpu, cpu_name); strcat(cpu, " processor, "); fmt_mhz(cpu + strlen(cpu), cpu_mhz); }
+    else strcpy(cpu, "Measuring the processor...");
+    const char *lines[7] = {
         "Written in C, compiled on the machine",
         "by Continuum 93's own C compiler.",
-        "",
+        cpu,
         "4 video layers, 1,024 colours at once.",
         "Drag a rail: windows snap together.",
         "Double-click a rail to fold it away,",
         "right-click it to swap sides.",
     };
     for (int i = 0; i < 7; i++)
-        txt_center(P_WIN, F_S, cx, y + 52 + i * 11, i < 2 ? N(14) : N(10), lines[i]);
+        txt_center(P_WIN, F_S, cx, y + 52 + i * 11, i < 2 ? N(14) : i == 2 ? ACC(11) : N(10), lines[i]);
 }
 
 /* ================================================================ Shutdown dialog */
@@ -944,6 +960,7 @@ int app_click(Win *w, int lx, int ly, int dbl, int right)
         case APP_SKETCH: return right ? 0 : sketch_click(w, lx, ly, dbl, right);
         case APP_PREFS: return right ? 0 : prefs_click(w, lx, ly, dbl, right);
         case APP_DIALOG: return right ? 0 : dialog_click(w, lx, ly, dbl, right);
+        case APP_PULSE: return right ? 0 : pulse_click(w, lx, ly, dbl, right);
     }
     return 0;
 }

@@ -10,7 +10,11 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <thread>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #include "audio.h"
 #include "input.h"
@@ -111,9 +115,15 @@ void padRemoved(SDL_JoystickID id) {
 // keeps tracking outside the window) and gamepads 0..3.
 void pollInput(SDL_Window* window, SDL_Renderer* renderer) {
     float gx, gy, lx, ly;
-    SDL_MouseButtonFlags mb = SDL_GetGlobalMouseState(&gx, &gy);
     int wx = 0, wy = 0;
+#ifdef __EMSCRIPTEN__
+    // A page has no "outside the window"; its global mouse is in page units that miss the canvas scaling.
+    SDL_MouseButtonFlags mb = SDL_GetMouseState(&gx, &gy);
+    (void)window;
+#else
+    SDL_MouseButtonFlags mb = SDL_GetGlobalMouseState(&gx, &gy);
     SDL_GetWindowPosition(window, &wx, &wy);
+#endif
     // Letterbox-aware; the reference divided by window/480 because it kept the window 16:9.
     SDL_RenderCoordinatesFromWindow(renderer, gx - float(wx), gy - float(wy), &lx, &ly);
 
@@ -169,9 +179,8 @@ struct Settings {
 };
 Settings loadSettings(const std::filesystem::path& data) {
     auto path = data / "init.cfg";
-    if (!std::filesystem::exists(path)) {
-        // The reference default file, verbatim (raw string: the paths keep their backslashes).
-        std::ofstream(path) << R"(# This provides the configuration to be loaded when Continuum starts.
+    // The reference default file, verbatim (raw string: the paths keep their backslashes), plus crtFilter.
+    static const char* kDefaults = R"(# This provides the configuration to be loaded when Continuum starts.
 
 # Controls whether the emulator enables network communication with any Continuum Tools listening.
 enableDebugging=true
@@ -181,6 +190,9 @@ fullscreen=false
 
 # Disables the mouse API (some linux based OSs need this for Continuum to run).
 disableMouse=false
+
+# Shows the screen as a CRT monitor would: curved glass, scanlines, phosphor mask (true or false).
+crtFilter=true
 
 # Points to the source file (.asm or .c) that will be automatically loaded and ran on boot.
 # The default is the dual-boot selector (Halcyon or Q OS); use Data\os\q.asm to boot Q OS directly.
@@ -192,10 +204,11 @@ serverPort=21098
 # Enable logging events
 logging=true
 )";
-        LOGI("Settings: created %s with defaults", path.string().c_str());
-    }
+    std::stringstream in;
+    if (std::ifstream f(path); f) in << f.rdbuf();
+    else if (!std::filesystem::exists(path) && std::ofstream(path) << kDefaults) { LOGI("Settings: created %s with defaults", path.string().c_str()); in << kDefaults; }
+    else { LOGW("Settings: cannot read or create %s; using the defaults", path.string().c_str()); in << kDefaults; }
     Settings s;
-    std::ifstream in(path);
     for (std::string line; std::getline(in, line);) {
         while (!line.empty() && (line.back() == 13 || line.back() == ' ')) line.pop_back();   // CRLF files
         size_t eq = line.find('=');
@@ -227,16 +240,19 @@ int main(int argc, char** argv) {
     }
     gFsRoot = (data / "filesystem").string();
     Settings settings = loadSettings(data);
-    const bool mouseEnabled = !settings.flag("disableMouse");
+    // Static from here on: on the web main() returns to the browser and the frame callback outlives its stack.
+    static const bool mouseEnabled = !settings.flag("disableMouse");
 
-    SDL_Window* window = SDL_CreateWindow("Continuum 93", kW * 3, kH * 3,
-                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
-                                          (settings.flag("fullscreen") ? SDL_WINDOW_FULLSCREEN : 0));
-    Video video;
+    static SDL_Window* window = SDL_CreateWindow("Continuum 93", kW * 3, kH * 3,
+                                                 SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+                                                 SDL_WINDOW_FILL_DOCUMENT |   // web: follow the page; elsewhere SDL drops it
+                                                 (settings.flag("fullscreen") ? SDL_WINDOW_FULLSCREEN : 0));
+    static Video video;
     if (!window || !video.init(window)) {
         LOGE("Continuum: no window (%s)", SDL_GetError());
         return 1;
     }
+    if (settings.str("crtFilter") != "false") video.setCrt(true);   // on unless turned off (D-34)
 #ifndef _WIN32   // Windows takes the multi-size icon from the exe's resources (continuum.rc)
     static const uint8_t kIconPng[] = {
 #include "icon_png.inc"
@@ -249,7 +265,7 @@ int main(int argc, char** argv) {
 
     audioInit();
     audioPlayInitializationSounds();   // Computer(initWithAudio: true) beeps before the boot program loads
-    auto machine = std::make_unique<TrackedMachine>();   // ~30 MB: heap, never the stack; Tracked: D-26
+    static auto machine = std::make_unique<TrackedMachine>();   // ~30 MB: heap, never the stack; Tracked: D-26
     machine->reset();
 
     // Boot (Run/Runner.cs): assemble the boot program, start at its first block. The setting is
@@ -260,7 +276,7 @@ int main(int argc, char** argv) {
     // C boot programs (the dual-boot selector) are compiled first; their includes resolve as in Runner.cs
     Loaded l = boot.empty() ? Loaded{} : bootPath.extension() == ".c" ? compileCInto(*machine, bootPath.string(), true, "")
                                                                       : assembleInto(*machine, bootPath.string());
-    std::thread cpu;
+    static std::thread cpu;
     // Sample host input once before the guest runs: its first mouse read must be the real position,
     // or the boot menu sees (0,0) -> pointer as "movement", selects a card and cancels its countdown.
     pollInput(window, video.renderer());
@@ -276,11 +292,13 @@ int main(int argc, char** argv) {
 
     service::init(window, video, *machine, data);
     // Continuum.cs: the pointer shows when the guest wants it (INT 0 0x11) or the service view is up.
-    bool guestCursor = true, cursorShown = true;
+    static bool guestCursor = true, cursorShown = true;
     if (!mouseEnabled) { SDL_HideCursor(); cursorShown = false; }   // disableMouse also hid the pointer in the reference
     SDL_StartTextInput(window);   // MonoGame's SDL2 had text input on by default
 
-    for (bool quit = false; !quit;) {
+    // One pass of the host loop; false once the machine shuts down. Captures nothing: a C callback on the web.
+    static auto frame = [] {
+        bool quit = false;
         for (SDL_Event e; SDL_PollEvent(&e);) {
             if (e.type == SDL_EVENT_QUIT) quit = true;
             else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) {
@@ -320,7 +338,14 @@ int main(int argc, char** argv) {
         }
         pollInput(window, video.renderer());
         service::view() ? service::draw() : video.present(*machine);
-    }
+        return !quit;
+    };
+#ifdef __EMSCRIPTEN__
+    // The browser owns the loop: a frame per display refresh. Never returns; a guest shutdown just stops drawing.
+    LOGI("Continuum: running in the browser");
+    emscripten_set_main_loop([] { if (!frame()) { emscripten_cancel_main_loop(); LOGI("Continuum: guest shut down"); } }, 0, true);
+#endif
+    while (frame()) {}
 
     machine->running.store(false);
     machine->debugWake();   // a CPU stopped by the debugger sees `running` and leaves

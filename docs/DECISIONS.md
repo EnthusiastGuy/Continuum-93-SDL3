@@ -250,3 +250,62 @@ Measured on the running reference and settled to its usual outcome, deterministi
 - Cost: WATCHER-armed runs ~5% slower on MSVC (every instruction leaves the chain); faster on GCC.
 - Measured in PLAN.md → Benchmarks; behaviour checked by every suite plus `--bench` (each mix's end state
   under `run()` equals `step()`'s, plain, watched and `--tracked`).
+
+## D-31 Float SIN/COS/TAN/CBR follow the host's libm in the last bit — NOTE (2026-11-04)
+- The oracle is .NET on Windows: `MathF.Sin/Cos/Tan/Cbrt` call the Windows CRT. The port calls the host's
+  `std::sin/cos/tan/cbrt(float)`, so Linux (glibc) and the web (musl) differ from the vectors by 1 ULP in
+  ~1/4 of the CBR cases and a few SIN/COS/TAN cases (373 of 103,487; every other instruction matches). The
+  reference on .NET for Linux/macOS would differ the same way.
+- Tried: computing in double and rounding once (correctly rounded everywhere). It broke 353 cases on
+  Windows: the Windows CRT is not correctly rounded either, so no portable formula reproduces it.
+- Upgrade path if bit-identical floats across hosts ever matter: ship our own float sin/cos/tan/cbrt
+  (then Windows differs from the reference instead).
+
+## D-32 Linux and web builds run in Docker — DECIDED 2026-11-04 (user: "easy to build them all at once")
+- `build linux|web|all` (both scripts). Linux: Debian bookworm image (`docker/linux.Dockerfile`):
+  glibc 2.36, so one binary runs on Raspberry Pi OS bookworm, Ubuntu 22.04+, Debian 12+; clang 16 for
+  musttail (bookworm's GCC 12 has none, D-29). arm64 builds emulated (QEMU) instead of a cross toolchain.
+- Web: `emscripten/emsdk:6.0.13`, pinned. pthreads (the CPU and APU keep their threads, so the page needs
+  COOP/COEP headers), `-fwasm-exceptions` (the compilers throw), `-mtail-call` (musttail). The main loop
+  is `frame()`, called by `emscripten_set_main_loop` on the web and by `while` elsewhere.
+- macOS builds only on a Mac (Apple SDK licence); `./build.sh` there.
+
+## D-33 A NaN made by a float op gets the x86 bits on every host — DECIDED 2026-11-04
+- x86 (the reference's hardware) makes `0xFFC00000` from non-NaN operands (sqrt(-1), 0*inf, pow(-2, 0.5),
+  sin(inf)); ARM makes `0x7FC00000`, WebAssembly either. Found on Linux arm64: 24 SQR/ISQR/POW variants failed,
+  22–56% of their cases. The bits are guest-visible (LD of a float register to memory, compares of raw bits).
+- `x86Nan(result, operands...)` (ops.h) in float MUL/DIV, POW, SQR/ISQR, SIN/COS/TAN; compiled out on x86.
+  Operand NaNs are left to propagate (same on both). FADD/FSUB never store a NaN (they keep the operand).
+
+## D-34 CRT filter: our own (MIT), on the CPU, on by default — DECIDED 2026-11-04 (user: own filter, "same look")
+- The Fantastic-Dizzy port's filter is libretro's zfast_crt_curvature (GPL-2.0+); the user chose an own MIT
+  filter with the same ingredients over making the binaries GPL. `src/crt.cpp`: per-axis bend (rows up to 3%
+  wider toward top and bottom, columns 4% taller toward the sides; edge middles fixed, so the whole picture stays
+  visible and its corners curve into black glass: the first radial barrel cut them off), rounded corners, a soft rim, gaussian scanline beam that widens on bright pixels (falloff 3.2 → 1.0,
+  boost 1.3), RGB phosphor triad per output column (off-colours -22%, half on white).
+- Moiré (user, 2026-11-04): below ~3 output pixels per scanline, point-sampled deep gaps beat against the grid.
+  The beam is averaged over each output pixel's height, its depth eases to its mean from 3 px/line to 2, and the
+  mask fades from 3 px/column to 2. Checked on Q OS's flat beige at 2.24 px/line: no bands.
+- CPU only, one path for every renderer (D3D, Vulkan, Metal, GL, WebGL, software): same pixels everywhere and no
+  shader toolchain. Position-only work is a per-pixel table rebuilt on resize; a frame is a 2-tap blend plus
+  lookups: 4.4 ms at 1440x810, 7.8 ms at 1080p (`conformance --crt`, Ryzen 9 9950X3D). Rendered at the
+  letterbox's real pixel size (crisp mask, no moiré); past 2.2 Mpx at 1/2, 1/3... and scaled by the GPU.
+- `crtFilter=true|false` in init.cfg, on by default (user): the default file says true and a missing key means
+  on, so existing init.cfg files get it too; `false` gives the reference's look. The service view stays unfiltered.
+
+## D-35 Halcyon shows the processor speed — DECIDED 2026-11-04 (user: "report the CPU correctly ... in the OS")
+- `hal_bench.c`: the CPU benchmark program's own loop and cycle model (D-17), 16 M runs in 32 slices of 500,000,
+  one per frame before the frame's work, so the desktop stays live. Once per cold start (a warm return keeps it).
+- Shown: the top bar ("815 MHz" beside "16M RAM", counting up in the accent colour while measuring); Pulse
+  ("Odin I  815 MHz" under the CPU load; a click on the chart measures again); About ("Odin I processor, 815 MHz"
+  in the line that was blank). Name from INT 0 0xF0, as the program.
+- The C oracle was regenerated: the reference compiles the new Halcyon to the same code (cc 542/542).
+
+## D-36 Packages and the website — DECIDED 2026-11-04 (user: zips for all platforms, macOS apart; a site to host)
+- `package.cmd` / `package.sh` → `dist/continuum93-<windows-x64|linux-x64|linux-arm64|web>.zip` and `dist/web/`.
+  Zipping runs in the emsdk image (it has Info-ZIP), so every host makes the same zips with Unix modes kept.
+  Each zip copies the repo's `Data/`, never the build folder's (local init.cfg, service layout).
+- Zip names carry no version: the site's buttons link fixed names; the version is written into the page.
+- `package-macos.sh` runs on a Mac (native arch; universal binary not tried: unverifiable here).
+- Site: the machine in an iframe (SDL fill-document owns its document); headers by `.htaccess`/`_headers`, with
+  our own small service worker (`coi-sw.js`) as the fallback rather than the third-party coi-serviceworker.
