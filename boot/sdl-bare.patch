@@ -143,11 +143,14 @@ index 64cabb7..3557176 100644
  // Declare all the function pointers and wrappers...
  #define SDL_KMSDRM_SYM(rc, fn, params)        \
 diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.c b/src/video/kmsdrm/SDL_kmsdrmvideo.c
-index 22b1b43..66a3581 100644
+index 22b1b43..75167fc 100644
 --- a/src/video/kmsdrm/SDL_kmsdrmvideo.c
 +++ b/src/video/kmsdrm/SDL_kmsdrmvideo.c
-@@ -50,6 +50,8 @@
+@@ -48,8 +48,11 @@
+ #include "SDL_kmsdrmopengles.h"
+ #include "SDL_kmsdrmvulkan.h"
  #include <dirent.h>
++#include <drm_fourcc.h>
  #include <errno.h>
  #include <poll.h>
 +#include <sys/ioctl.h>
@@ -155,39 +158,194 @@ index 22b1b43..66a3581 100644
  #include <sys/param.h>
  #include <sys/stat.h>
  #include <sys/utsname.h>
-@@ -634,6 +636,126 @@ static void KMSDRM_DeleteDevice(SDL_VideoDevice *device)
+@@ -634,6 +637,284 @@ static void KMSDRM_DeleteDevice(SDL_VideoDevice *device)
      SDL_KMSDRM_UnloadSymbols();
  }
  
 +/* Dumb-buffer mode: with no libgbm (no Mesa), SDL renders in software into mapped DRM dumb buffers.
-+   Two of them, page-flipped at vblank: KMS drivers (vc4) scan a buffer out as it is drawn, so drawing
-+   into the shown one flickers (each frame starts with a clear). Drivers without page flips get one
-+   buffer and DIRTYFB, which suits firmware framebuffers (simpledrm copies on DIRTYFB anyway). */
++   Two of them, swapped at vblank: KMS drivers (vc4) scan a buffer out as it is drawn, so drawing into the
++   shown one flickers (each frame starts with a clear). A window smaller than the mode goes on an overlay
++   plane that the display scales up (nearest neighbour where offered), so the CPU draws only the window's
++   pixels; a black full-mode buffer sits on the CRTC under it. Drivers without page flips get one buffer
++   and DIRTYFB, which suits firmware framebuffers (simpledrm copies on DIRTYFB anyway). */
 +static void KMSDRM_GetModeToSet(SDL_Window *window, drmModeModeInfo *out_mode);
++
++static void KMSDRM_DestroyDumb(int fd, SDL_WindowData *windata, int i)
++{
++    if (windata->dumb_map[i]) {
++        munmap(windata->dumb_map[i], windata->dumb_size[i]);
++        windata->dumb_map[i] = NULL;
++    }
++    if (windata->dumb_fb[i]) {
++        KMSDRM_drmModeRmFB(fd, windata->dumb_fb[i]);
++        windata->dumb_fb[i] = 0;
++    }
++    if (windata->dumb_handle[i]) {
++        struct drm_mode_destroy_dumb destroy = { windata->dumb_handle[i] };
++        ioctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
++        windata->dumb_handle[i] = 0;
++    }
++}
++
++// Dumb buffer i: w x h XRGB8888, mapped and cleared to black.
++static bool KMSDRM_CreateDumb(int fd, SDL_WindowData *windata, int i, int w, int h)
++{
++    struct drm_mode_create_dumb create;
++    struct drm_mode_map_dumb map;
++    void *mapped;
++
++    SDL_zero(create);
++    create.width = w;
++    create.height = h;
++    create.bpp = 32;
++    if (ioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
++        return SDL_SetError("KMSDRM: cannot create a dumb buffer: %s", strerror(errno));
++    }
++    windata->dumb_handle[i] = create.handle;
++    windata->dumb_size[i] = (size_t)create.size;
++    if (i < 2) {
++        windata->dumb_pitch = create.pitch;
++    }
++    SDL_zero(map);
++    map.handle = create.handle;
++    if (KMSDRM_drmModeAddFB(fd, w, h, 24, 32, create.pitch, create.handle, &windata->dumb_fb[i]) ||
++        ioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map) < 0 ||
++        (mapped = mmap(NULL, windata->dumb_size[i], PROT_READ | PROT_WRITE, MAP_SHARED, fd, map.offset)) == MAP_FAILED) {
++        SDL_SetError("KMSDRM: cannot map the dumb buffer: %s", strerror(errno));
++        KMSDRM_DestroyDumb(fd, windata, i);
++        return false;
++    }
++    windata->dumb_map[i] = mapped;
++    SDL_memset(mapped, 0, windata->dumb_size[i]);
++    return true;
++}
++
++// A plane property by name: its id (0 if absent) and current value, or the value of its enum entry `entry`.
++static uint32_t KMSDRM_PlaneProperty(int fd, uint32_t plane, const char *name, const char *entry, uint64_t *value)
++{
++    drmModeObjectProperties *props = KMSDRM_drmModeObjectGetProperties(fd, plane, DRM_MODE_OBJECT_PLANE);
++    uint32_t id = 0, i;
++    int k;
++
++    for (i = 0; props && !id && i < props->count_props; ++i) {
++        drmModePropertyRes *prop = KMSDRM_drmModeGetProperty(fd, props->props[i]);
++        if (prop && SDL_strcmp(prop->name, name) == 0) {
++            *value = props->prop_values[i];
++            id = entry ? 0 : prop->prop_id;
++            for (k = 0; entry && k < prop->count_enums; ++k) {
++                if (SDL_strcmp(prop->enums[k].name, entry) == 0) {
++                    *value = prop->enums[k].value;
++                    id = prop->prop_id;
++                }
++            }
++        }
++        if (prop) {
++            KMSDRM_drmModeFreeProperty(prop);
++        }
++    }
++    if (props) {
++        KMSDRM_drmModeFreeObjectProperties(props);
++    }
++    return id;
++}
++
++// A free overlay plane of the CRTC that takes XRGB8888, or 0.
++static uint32_t KMSDRM_FindOverlay(int fd, uint32_t crtc_id)
++{
++    drmModeRes *res = KMSDRM_drmModeGetResources(fd);
++    drmModePlaneRes *planes = KMSDRM_drmModeGetPlaneResources(fd);
++    uint32_t found = 0, i, j;
++    uint64_t type;
++    int index = -1;
++
++    for (i = 0; res && i < (uint32_t)res->count_crtcs; ++i) {
++        if (res->crtcs[i] == crtc_id) {
++            index = (int)i;
++        }
++    }
++    for (i = 0; planes && index >= 0 && !found && i < planes->count_planes; ++i) {
++        drmModePlane *plane = KMSDRM_drmModeGetPlane(fd, planes->planes[i]);
++        if (plane && (plane->possible_crtcs & (1u << index)) && !plane->crtc_id &&
++            KMSDRM_PlaneProperty(fd, plane->plane_id, "type", NULL, &type) && type == DRM_PLANE_TYPE_OVERLAY) {
++            for (j = 0; j < plane->count_formats; ++j) {
++                if (plane->formats[j] == DRM_FORMAT_XRGB8888) {
++                    found = plane->plane_id;
++                }
++            }
++        }
++        if (plane) {
++            KMSDRM_drmModeFreePlane(plane);
++        }
++    }
++    if (planes) {
++        KMSDRM_drmModeFreePlaneResources(planes);
++    }
++    if (res) {
++        KMSDRM_drmModeFreeResources(res);
++    }
++    return found;
++}
++
++// Window buffer i on the plane, letterboxed and scaled; blocking: returns once it is on screen (vblank).
++static int KMSDRM_ShowOnPlane(int fd, SDL_WindowData *windata, SDL_DisplayData *dispdata, int i)
++{
++    return KMSDRM_drmModeSetPlane(fd, windata->dumb_plane, dispdata->crtc.crtc->crtc_id, windata->dumb_fb[i], 0,
++                                  windata->dumb_dst.x, windata->dumb_dst.y, windata->dumb_dst.w, windata->dumb_dst.h,
++                                  0, 0, (uint32_t)windata->dumb_w << 16, (uint32_t)windata->dumb_h << 16);
++}
++
++/* At window creation: can the display scale a window this small? Puts a black full-mode buffer on the CRTC
++   and tries a plane, so a driver that cannot scale says so now and the window takes the mode's size instead. */
++static bool KMSDRM_SetupOverlay(SDL_VideoDevice *_this, SDL_Window *window)
++{
++    SDL_WindowData *windata = window->internal;
++    SDL_DisplayData *dispdata = SDL_GetDisplayDriverDataForWindow(window);
++    drmModeModeInfo *mode = &dispdata->original_mode;
++    uint32_t crtc = dispdata->crtc.crtc->crtc_id, filter;
++    int fd = _this->internal->drm_fd;
++    int w = window->w, h = window->h;
++    uint64_t nearest;
++    bool ok;
++
++    if (w <= 0 || h <= 0 || w > mode->hdisplay || h > mode->vdisplay || (w == mode->hdisplay && h == mode->vdisplay)) {
++        return false;
++    }
++    windata->dumb_plane = KMSDRM_FindOverlay(fd, crtc);
++    if (!windata->dumb_plane) {
++        return false;
++    }
++    filter = KMSDRM_PlaneProperty(fd, windata->dumb_plane, "SCALING_FILTER", "Nearest Neighbor", &nearest);
++    if (filter) {
++        KMSDRM_drmModeObjectSetProperty(fd, windata->dumb_plane, DRM_MODE_OBJECT_PLANE, filter, nearest);
++    }
++    windata->dumb_w = w;
++    windata->dumb_h = h;
++    windata->dumb_dst.x = windata->dumb_dst.y = 0;
++    windata->dumb_dst.w = mode->hdisplay;
++    windata->dumb_dst.h = mode->vdisplay;
++    ok = KMSDRM_CreateDumb(fd, windata, 2, mode->hdisplay, mode->vdisplay) &&
++         !KMSDRM_drmModeSetCrtc(fd, crtc, windata->dumb_fb[2], 0, 0, &dispdata->connector.connector->connector_id, 1, mode) &&
++         KMSDRM_CreateDumb(fd, windata, 0, w, h) && !KMSDRM_ShowOnPlane(fd, windata, dispdata, 0);
++    KMSDRM_DestroyDumb(fd, windata, 0);  // the trial buffer; removing it takes the plane down again
++    if (!ok) {
++        KMSDRM_DestroyDumb(fd, windata, 2);
++        windata->dumb_plane = 0;
++        return false;
++    }
++    SDL_Log("KMSDRM: the display scales the %dx%d window (plane %u, %s filter)", w, h, windata->dumb_plane, filter ? "nearest" : "default");
++    return true;
++}
 +
 +static void KMSDRM_DestroyWindowFramebuffer(SDL_VideoDevice *_this, SDL_Window *window)
 +{
 +    SDL_WindowData *windata = window->internal;
-+    int fd = _this->internal->drm_fd;
 +    int i;
 +
 +    if (!windata) {
 +        return;
 +    }
 +    for (i = 0; i < 2; ++i) {
-+        if (windata->dumb_map[i]) {
-+            munmap(windata->dumb_map[i], windata->dumb_size);
-+            windata->dumb_map[i] = NULL;
-+        }
-+        if (windata->dumb_fb[i]) {
-+            KMSDRM_drmModeRmFB(fd, windata->dumb_fb[i]);
-+            windata->dumb_fb[i] = 0;
-+        }
-+        if (windata->dumb_handle[i]) {
-+            struct drm_mode_destroy_dumb destroy = { windata->dumb_handle[i] };
-+            ioctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
-+            windata->dumb_handle[i] = 0;
-+        }
++        KMSDRM_DestroyDumb(_this->internal->drm_fd, windata, i);
 +    }
 +}
 +
@@ -196,55 +354,50 @@ index 22b1b43..66a3581 100644
 +    SDL_WindowData *windata = window->internal;
 +    SDL_DisplayData *dispdata = SDL_GetDisplayDriverDataForWindow(window);
 +    int fd = _this->internal->drm_fd;
-+    struct drm_mode_create_dumb create;
-+    struct drm_mode_map_dumb map;
-+    void *mapped;
-+    int w, h, i;
++    int w, h, bw, bh, i;
++    char speed[32];
++    float s;
 +
 +    KMSDRM_DestroyWindowFramebuffer(_this, window);
 +    KMSDRM_GetModeToSet(window, &dispdata->mode);
-+
-+    // SDL sizes the surface from the window: never let it outgrow the buffer.
 +    SDL_GetWindowSizeInPixels(window, &w, &h);
-+    for (i = 0; i < 2; ++i) {
-+        SDL_zero(create);
-+        create.width = SDL_max(w, dispdata->mode.hdisplay);
-+        create.height = SDL_max(h, dispdata->mode.vdisplay);
-+        create.bpp = 32;
-+        if (ioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
-+            SDL_SetError("KMSDRM: cannot create a dumb buffer: %s", strerror(errno));
-+            KMSDRM_DestroyWindowFramebuffer(_this, window);
-+            return false;
-+        }
-+        windata->dumb_handle[i] = create.handle;
-+        windata->dumb_size = (size_t)create.size;
-+
-+        SDL_zero(map);
-+        map.handle = create.handle;
-+        if (KMSDRM_drmModeAddFB(fd, create.width, create.height, 24, 32, create.pitch, create.handle, &windata->dumb_fb[i]) ||
-+            ioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map) < 0 ||
-+            (mapped = mmap(NULL, windata->dumb_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, map.offset)) == MAP_FAILED) {
-+            SDL_SetError("KMSDRM: cannot map the dumb buffer: %s", strerror(errno));
-+            KMSDRM_DestroyWindowFramebuffer(_this, window);
-+            return false;
-+        }
-+        windata->dumb_map[i] = mapped;
-+        SDL_memset(mapped, 0, windata->dumb_size);
++    if (windata->dumb_plane) {
++        // The plane shows the window letterboxed in the mode; the mouse keeps the screen's speed.
++        s = SDL_min((float)dispdata->mode.hdisplay / w, (float)dispdata->mode.vdisplay / h);
++        windata->dumb_dst.w = (int)(w * s + 0.5f);
++        windata->dumb_dst.h = (int)(h * s + 0.5f);
++        windata->dumb_dst.x = (dispdata->mode.hdisplay - windata->dumb_dst.w) / 2;
++        windata->dumb_dst.y = (dispdata->mode.vdisplay - windata->dumb_dst.h) / 2;
++        SDL_snprintf(speed, sizeof(speed), "%g", (double)w / windata->dumb_dst.w);
++        SDL_SetHint(SDL_HINT_MOUSE_NORMAL_SPEED_SCALE, speed);
++        bw = w;
++        bh = h;
++    } else {  // SDL sizes the surface from the window: never let it outgrow the buffer.
++        bw = SDL_max(w, dispdata->mode.hdisplay);
++        bh = SDL_max(h, dispdata->mode.vdisplay);
 +    }
-+
-+    if (KMSDRM_drmModeSetCrtc(fd, dispdata->crtc.crtc->crtc_id, windata->dumb_fb[0], 0, 0,
-+                              &dispdata->connector.connector->connector_id, 1, &dispdata->mode)) {
++    windata->dumb_w = w;
++    windata->dumb_h = h;
++    for (i = 0; i < 2; ++i) {
++        if (!KMSDRM_CreateDumb(fd, windata, i, bw, bh)) {
++            KMSDRM_DestroyWindowFramebuffer(_this, window);
++            return false;
++        }
++    }
++    if (windata->dumb_plane ? KMSDRM_ShowOnPlane(fd, windata, dispdata, 0)
++                            : KMSDRM_drmModeSetCrtc(fd, dispdata->crtc.crtc->crtc_id, windata->dumb_fb[0], 0, 0,
++                                                    &dispdata->connector.connector->connector_id, 1, &dispdata->mode)) {
 +        SDL_SetError("KMSDRM: cannot show the dumb buffer: %s", strerror(errno));
 +        KMSDRM_DestroyWindowFramebuffer(_this, window);
 +        return false;
 +    }
 +    windata->dumb_back = 1;
 +    windata->dumb_flip = true;
-+    SDL_Log("KMSDRM: %dx%d dumb buffers, page-flipped at vblank", dispdata->mode.hdisplay, dispdata->mode.vdisplay);
++    SDL_Log("KMSDRM: %dx%d dumb buffers, %s", bw, bh, windata->dumb_plane ? "scaled by the display, swapped at vblank" : "page-flipped at vblank");
 +
 +    *format = SDL_PIXELFORMAT_XRGB8888;
 +    *pixels = windata->dumb_map[1];
-+    *pitch = (int)create.pitch;
++    *pitch = (int)windata->dumb_pitch;
 +    return true;
 +}
 +
@@ -255,6 +408,14 @@ index 22b1b43..66a3581 100644
 +    int fd = _this->internal->drm_fd;
 +    struct drm_mode_fb_dirty_cmd dirty;
 +
++    if (windata->dumb_plane) {
++        if (KMSDRM_ShowOnPlane(fd, windata, dispdata, windata->dumb_back)) {
++            return SDL_SetError("KMSDRM: cannot show the frame on the plane: %s", strerror(errno));
++        }
++        windata->dumb_back ^= 1;
++        window->surface->pixels = windata->dumb_map[windata->dumb_back];
++        return true;
++    }
 +    if (windata->dumb_flip) {
 +        // Show the finished frame at the next vblank, then draw into the buffer that was on screen.
 +        windata->waiting_for_flip = true;
@@ -282,7 +443,7 @@ index 22b1b43..66a3581 100644
  static SDL_VideoDevice *KMSDRM_CreateDevice(void)
  {
      SDL_VideoDevice *device;
-@@ -687,16 +809,22 @@ static SDL_VideoDevice *KMSDRM_CreateDevice(void)
+@@ -687,16 +968,22 @@ static SDL_VideoDevice *KMSDRM_CreateDevice(void)
      device->DestroyWindow = KMSDRM_DestroyWindow;
      device->SetWindowFocusable = KMSDRM_SetWindowFocusable;
  
@@ -315,7 +476,7 @@ index 22b1b43..66a3581 100644
  
  #ifdef SDL_VIDEO_VULKAN
      device->Vulkan_LoadLibrary = KMSDRM_Vulkan_LoadLibrary;
-@@ -1738,7 +1866,9 @@ static void KMSDRM_GetModeToSet(SDL_Window *window, drmModeModeInfo *out_mode)
+@@ -1738,7 +2025,9 @@ static void KMSDRM_GetModeToSet(SDL_Window *window, drmModeModeInfo *out_mode)
      SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
      SDL_DisplayData *dispdata = display->internal;
  
@@ -326,7 +487,18 @@ index 22b1b43..66a3581 100644
          *out_mode = dispdata->fullscreen_mode;
      } else {
          drmModeModeInfo *mode = KMSDRM_GetClosestDisplayMode(display, window->windowed.w, window->windowed.h);
-@@ -1902,7 +2032,7 @@ static void KMSDRM_ReleaseVT(void *userdata)
+@@ -1755,6 +2044,10 @@ static void KMSDRM_DirtySurfaces(SDL_Window *window)
+     SDL_WindowData *windata = window->internal;
+     drmModeModeInfo mode;
+ 
++    if (windata->dumb_plane) {
++        return;  // dumb-buffer mode with a scaling plane: the window keeps its size, the display scales it
++    }
++
+     /* Can't recreate EGL surfaces right now, need to wait until SwapWindow
+        so the correct thread-local surface and context state are available */
+     windata->egl_surface_dirty = true;
+@@ -1902,7 +2195,7 @@ static void KMSDRM_ReleaseVT(void *userdata)
  
      for (i = 0; i < viddata->num_windows; i++) {
          SDL_Window *window = viddata->windows[i];
@@ -335,7 +507,7 @@ index 22b1b43..66a3581 100644
              KMSDRM_DestroySurfaces(_this, window);
          }
      }
-@@ -1918,7 +2048,7 @@ static void KMSDRM_AcquireVT(void *userdata)
+@@ -1918,7 +2211,7 @@ static void KMSDRM_AcquireVT(void *userdata)
      KMSDRM_drmSetMaster(viddata->drm_fd);
      for (i = 0; i < viddata->num_windows; i++) {
          SDL_Window *window = viddata->windows[i];
@@ -344,7 +516,7 @@ index 22b1b43..66a3581 100644
              KMSDRM_CreateSurfaces(_this, window);
          }
      }
-@@ -2144,7 +2274,17 @@ bool KMSDRM_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Propert
+@@ -2144,7 +2437,19 @@ bool KMSDRM_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Propert
          windata->double_buffer = true;
      }
  
@@ -358,27 +530,34 @@ index 22b1b43..66a3581 100644
 +        }
 +        KMSDRM_drmSetMaster(viddata->drm_fd);
 +        dispdata->fullscreen_mode = dispdata->original_mode;
-+        SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, dispdata->original_mode.hdisplay, dispdata->original_mode.vdisplay);
++        if (!KMSDRM_SetupOverlay(_this, window)) {  // no scaling plane: the window takes the mode's size
++            SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, dispdata->original_mode.hdisplay, dispdata->original_mode.vdisplay);
++        }
 +    } else if (!is_vulkan && !vulkan_mode) { // NON-Vulkan block.
  
          /* Maybe you didn't ask for an OPENGL window, but that's what you will get.
             See following comments on why. */
 diff --git a/src/video/kmsdrm/SDL_kmsdrmvideo.h b/src/video/kmsdrm/SDL_kmsdrmvideo.h
-index 67ec518..f661289 100644
+index 67ec518..011d62d 100644
 --- a/src/video/kmsdrm/SDL_kmsdrmvideo.h
 +++ b/src/video/kmsdrm/SDL_kmsdrmvideo.h
-@@ -177,6 +177,14 @@ struct SDL_WindowData
+@@ -177,6 +177,19 @@ struct SDL_WindowData
  
      /* This dictates what approach we'll use for SwapBuffers. */
      bool (*swap_window)(SDL_VideoDevice *_this, SDL_Window *window);
 +
-+    // Dumb-buffer mode (no GBM): two window framebuffers, SDL draws into dumb_back while the other is shown.
-+    uint32_t dumb_handle[2];
-+    uint32_t dumb_fb[2];
-+    void *dumb_map[2];
-+    size_t dumb_size;
++    // Dumb-buffer mode (no GBM): two window framebuffers, SDL draws into dumb_back while the other is shown;
++    // with an overlay plane, buffer 2 is the black full-mode buffer on the CRTC under it.
++    uint32_t dumb_handle[3];
++    uint32_t dumb_fb[3];
++    void *dumb_map[3];
++    size_t dumb_size[3];
++    uint32_t dumb_pitch;
 +    int dumb_back;
-+    bool dumb_flip;   // page flips work; false: one buffer, shown as SDL draws into it
++    bool dumb_flip;       // page flips work; false: one buffer, shown as SDL draws into it
++    uint32_t dumb_plane;  // the overlay plane that scales the window up, or 0: the window has the mode's size
++    int dumb_w, dumb_h;   // the window buffers' size
++    SDL_Rect dumb_dst;    // where the plane shows them, in mode pixels
  };
  
  typedef struct KMSDRM_FBInfo

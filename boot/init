@@ -23,6 +23,40 @@ if [ -z "$found" ]; then
     exec sh
 fi
 
+# First boot: the image is 64 MB; give its partition the whole stick or card. FAT32 cannot grow in place, so the
+# files go to RAM, the partition is extended (MBR entry 1, type 0x0C: our image only) and formatted again, and
+# the files come back; BIOS sticks reinstall syslinux (extlinux). Runs while more than 64 MB lie unused after the partition.
+klog() { echo "c93 init: $*" > /dev/kmsg; }   # into dmesg, so kernel.log on the stick has it, timed
+le32() { for s in 0 8 16 24; do printf "\\$(printf %03o $(($1 >> s & 255)))"; done; }   # 4 bytes, little-endian
+p=$found
+d=$(basename "$(readlink -f /sys/class/block/$p/..)")
+start=$(cat /sys/class/block/$p/start) size=$(cat /sys/class/block/$p/size) total=$(cat /sys/class/block/$d/size 2>/dev/null || echo 0)
+new=$((total - start))
+[ $new -gt 4294967295 ] && new=4294967295   # the MBR's limit: 2 TiB
+type=$(dd if=/dev/$d bs=1 skip=450 count=1 2>/dev/null | od -An -tx1 | tr -d ' ')
+if [ "$(cat /sys/class/block/$p/partition 2>/dev/null)" = 1 ] && [ "$type" = 0c ] && [ $((new - size)) -gt 131072 ] && cp -a /mnt/c93 /tmp/stick; then
+    echo "Continuum 93: first boot, giving the partition the whole device ($((new / 2048)) MB). Do not unplug."
+    klog "growing $p to $new sectors; files copied to RAM"
+    umount /mnt/c93
+    le32 $new | dd of=/dev/$d bs=1 seek=458 count=4 conv=notrunc 2>/dev/null
+    blockdev --rereadpt /dev/$d
+    klog "partition table updated"
+    for try in $(seq 50); do [ "$(cat /sys/class/block/$p/size 2>/dev/null)" = $new ] && [ -e /dev/$p ] && break; sleep 0.1; done
+    klog "partition reread"
+    # busybox's mkdosfs leaves "hidden sectors" (where the partition starts) at 0; BIOS boot code reads it.
+    mkdosfs -n C93 /dev/$p >/dev/null && for o in 28 3100; do le32 $start | dd of=/dev/$p bs=1 seek=$o count=4 conv=notrunc 2>/dev/null; done &&
+        mount -t vfat -o noatime /dev/$p /mnt/c93 && cp -a /tmp/stick/. /mnt/c93/ && sync && umount /mnt/c93 &&
+        mount -t vfat -o noatime,flush /dev/$p /mnt/c93 || {   # copied without flush (one write per file is slow), then as usual
+        echo "Continuum 93: growing the partition failed; its files are in /tmp/stick. Shell:"
+        exec sh
+    }
+    klog "formatted, files back"
+    rm -rf /tmp/stick
+    [ -x /bin/extlinux ] && extlinux --install /mnt/c93/syslinux >/dev/null
+    sync
+    klog "grown"
+fi
+
 # The display: a KMS driver (the Pi's vc4) can still be probing when the stick is up. Wait up to 5 s.
 for try in $(seq 50); do
     [ -e /dev/dri/card0 ] && break
@@ -34,11 +68,22 @@ export XDG_STATE_HOME=/mnt/c93 HOME=/tmp
 mkdir -p /mnt/c93/continuum93/logs
 dmesg > /mnt/c93/continuum93/logs/kernel.log
 export LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/lib/i386-linux-gnu:/lib/aarch64-linux-gnu
+# Pi 4/5: two HDMI ports, a sound card each (vc4hdmi0, vc4hdmi1); ALSA's default is card 0, which refuses to play
+# when its port has no monitor. Use the card of the connected port.
+for s in /sys/class/drm/card*-HDMI-A-*/status; do
+    [ "$(cat $s 2>/dev/null)" = connected ] || continue
+    n=${s%/status}
+    n=${n##*-}
+    for c in /proc/asound/card*; do [ "$(cat $c/id 2>/dev/null)" = vc4hdmi$((n - 1)) ] && export ALSA_CARD=${c##*card}; done
+    break
+done
+[ -n "$ALSA_CARD" ] && echo "c93 init: sound on ALSA card $ALSA_CARD (the connected HDMI port)" >> /mnt/c93/continuum93/logs/kernel.log
 # ALSA starts every mixer muted at 0: open up the usual outputs on each card (alongside the emulator's start).
 for c in /dev/snd/controlC*; do
     for s in Master PCM Speaker Headphone Front 'Line Out'; do amixer -q -c ${c##*C} sset "$s" 90% unmute 2>/dev/null; done
 done &
-export SDL_VIDEO_DRIVER=kmsdrm SDL_RENDER_DRIVER=software
+# A 480x270 window: the Pi's display scales it in hardware; elsewhere SDL gives it the whole mode (D-42).
+export SDL_VIDEO_DRIVER=kmsdrm SDL_RENDER_DRIVER=software C93_WINDOW_SCALE=1
 /c93/continuum
 
 umount /mnt/c93

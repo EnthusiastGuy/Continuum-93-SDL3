@@ -6,10 +6,26 @@ Read this first in every session. Update it at the end of every work block.
 **Next action:** the user tries the images on real hardware and sends back `continuum93/logs/` (continuum.log,
 kernel.log) from the stick/card. PCs: `dist/continuum93-boot-x64.zip` (and x86), Secure Boot off; stretched picture:
 Shift+F11 (D-39). Pi: `dist/continuum93-boot-rpi.zip` on an SD card, Pi 3/4/5; its display (vc4), input and sound
-are untested (QEMU has no vc4), so check those first (flicker fix: retest on the Zero 2 W). Fix what real hardware shows (likely: GOP mode on big screens,
+are untested (QEMU has no vc4), so check those first (flicker fix, first-boot resize and the scaled picture D-42: retest on the Zero 2 W, Pi 4, Pi 5; send the fps lines). Fix what real hardware shows (likely: GOP mode on big screens,
 the ALSA card choice, laptop touchpads; on the Pi, vc4 bring-up). Still open from phase 9: asm/BASIC suites on
 Windows after D-37 (expect 129/129, 341/341), the linux-arm64 zip on a real Pi. Branch `feature/bootimage`
 (PC images and D-39 committed as 642c678; the Pi image is not committed yet).
+
+### 2026-11-05 — Pi mouse lag: hardware-scaled picture, frame-rate log (D-42)
+- User, Pi 5: card resize works. Plane found but unused (DirtySurfaces resized the window; fixed), 22.5 fps before
+  the fix; no sound (HDMI 0's card, monitor on the other port; init now picks the connected port's card). Rebuilt;
+  PCs rechecked in QEMU (x64 BIOS: same path, sound opens, guest shutdown). Pi retest pending.
+- SDL patch: overlay plane scaling for windows smaller than the mode (nearest neighbour), probed at window creation;
+  emulator: `C93_WINDOW_SCALE` (boot init: 1) and a 30 s frame-rate log line. PCs (no overlay on simpledrm) keep
+  the full-mode path: QEMU x64 BIOS 60.0 fps, slowest 16.8 ms, mouse clicks and guest shutdown work; desktop
+  Windows unchanged (3x window). The Pi path is untested until real hardware: the user reports the log lines
+  "KMSDRM: the display scales ..." and "Video: N fps" on the Zero 2 W / Pi 4 / Pi 5, and whether the lag is gone.
+
+### 2026-11-05 — first-boot resize (D-41)
+- init grows partition 1 to the whole device on first boot (RAM copy, MBR size, mkdosfs, copy back, extlinux on
+  PCs). Verified in QEMU: x64 BIOS 512 MB (direct kernel) → 511 MB, then a real BIOS→syslinux boot of the grown
+  disk and a UEFI boot of it reach Halcyon; x64 UEFI 1 GB first boot: grow 0.65 s, Halcyon up; Pi (raspi3b)
+  512 MB: grown, files intact, hidden sectors 2048. init steps are in kernel.log ("c93 init: ..."), timestamped.
 
 ### 2026-11-04 — Raspberry Pi boot image (D-40)
 - User, Pi Zero 2 W: boots, Halcyon runs (slow); a black flicker at the frame rate; one boot of four had

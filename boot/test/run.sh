@@ -5,10 +5,12 @@
 # command> such as "m:mouse_move 50 50", or t:<text> typed + Enter), screenshots again (shot2.png), then
 # copies the stick's logs to /out/<fw>/continuum93 and its Data/init.cfg to /out/<fw>. Audio lands in audio.wav, serial in serial.txt.
 # Env: QEMU="qemu-system-i386 -cpu host" for x86; KERNEL=/img/BOOTX64.EFI APPEND="console=ttyS0 ..." to
-# boot the kernel directly with extra arguments (the serial console shows init's and the emulator's output).
+# boot the kernel directly with extra arguments (the serial console shows init's and the emulator's output);
+# DISK=512M enlarges the image first (a bigger stick) and keeps it as /out/<fw>/disk.img.
 IMG=$1 FW=$2 T=$3; shift 3
 O=/out/$FW; rm -rf $O; mkdir -p $O
 cp $IMG /tmp/t.img
+[ -n "$DISK" ] && truncate -s $DISK /tmp/t.img   # a bigger stick: init grows the partition on first boot
 FWARGS= MACHINE=q35
 if [ $FW = uefi32 ]; then
   cp /usr/share/OVMF/OVMF32_VARS_4M.fd /tmp/vars.fd; MACHINE=q35,smm=on
@@ -46,4 +48,5 @@ kill -0 $! 2>/dev/null && echo "VM still running" || echo "VM exited by itself";
 export MTOOLS_SKIP_CHECK=1
 mcopy -s -n -i /tmp/t.img@@1048576 ::/continuum93 $O/ 2>/dev/null
 mcopy -n -i /tmp/t.img@@1048576 ::/Data/init.cfg $O/ 2>/dev/null
+[ -n "$DISK" ] && cp /tmp/t.img $O/disk.img   # boot it again: run.sh /out/<fw>/disk.img ...
 ls -la $O

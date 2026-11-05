@@ -362,3 +362,31 @@ Measured on the running reference and settled to its usual outcome, deterministi
   software renderer clears then draws each frame, and vc4 scans out the buffer it draws into. The flip waits for
   vblank (SDL's own KMSDRM_WaitPageflip), so frames are vsynced. simpledrm accepts flips too (PCs use the same
   path, checked in QEMU); a driver that refuses them falls back to the old single buffer + DIRTYFB.
+
+## D-41 First-boot resize: copy to RAM, repartition, reformat — DECIDED 2026-11-05 (user: "maybe the user wants to add more files and needs the whole space available")
+- The image stays 64 MB; init grows partition 1 to the whole device on first boot. FAT32 cannot be grown in place,
+  and must stay FAT (Pi firmware and UEFI boot only from FAT), so: files to RAM, MBR size field, `mkdosfs`, files
+  back, `extlinux --install` on PCs (Debian's `syslinux` installer needs mtools + glibc's gconv modules; extlinux
+  is one binary on the mounted partition, same 6.04). busybox mkdosfs leaves hidden sectors at 0: init writes the
+  partition start into both boot sectors (BIOS boot reads it).
+- Only our layout (partition 1, MBR type 0x0C, >64 MB unused after it); a power cut mid-way costs a rewrite of a
+  stick that holds nothing of the user's yet. Copying back without `flush`, then one sync.
+- Init logs its steps to /dev/kmsg; the PC kernel now timestamps its log (`CONFIG_PRINTK_TIME`, common fragment).
+
+## D-42 Pi: the display scales the 480x270 picture; frame-rate log — DECIDED 2026-11-05 (user: mouse lag on Pi Zero 2 W, 4 and 5, "Can we not fix it?")
+- Cause: Halcyon draws its own pointer, so it moves only as fast as whole frames are produced and shown. On a Pi the
+  CPU scaled every frame up to the mode in software (1080p: ~16 MB written into display memory per frame), so
+  frames missed vblank and the frame rate, and with it the lag, fell. Not a proprietary driver: vc4 and dwc_otg are GPL.
+- Fix: in the SDL patch's dumb-buffer mode, a window smaller than the mode goes on a free overlay plane that the
+  display scales (vc4 offers SCALING_FILTER "Nearest Neighbor"; set when present), letterboxed, over a black
+  full-mode buffer on the CRTC. A blocking SetPlane swaps the two window buffers (vc4's commit waits for flip_done).
+  Tried at window creation with a real SetPlane: a driver that refuses keeps today's path (window = mode size).
+  SDL_HINT_MOUSE_NORMAL_SPEED_SCALE = window/shown width keeps the pointer's speed in screen terms.
+- The emulator asks for that small window only when `C93_WINDOW_SCALE=1` (boot init sets it): stock SDL's KMSDRM
+  would instead switch the monitor to the mode closest to the window (640x480), so the Linux zips keep 3x.
+- `Video: N fps over 30 s, slowest frame M ms` every 30 s in continuum.log (host loop, not a hot path).
+- KMSDRM_DirtySurfaces (SDL's reply to SetWindowSize/SetWindowFullscreen, called right after creation) resized the
+  window to the mode; with a scaling plane it now leaves the size alone. Pi 5, before that fix: the plane was found
+  (plane 107, nearest) but the buffers came out 1920x1080, 22.5 fps.
+- Pi 4/5 sound: each HDMI port is its own ALSA card (vc4hdmi0/1) and one without a monitor refuses (ENOTSUPP,
+  "Unknown error 524"); init sets ALSA_CARD to the connected port's card and notes it in kernel.log.

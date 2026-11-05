@@ -46,7 +46,10 @@ cmake --build $W/app
 APP=$W/app/continuum
 LIBDIR=$(dirname "$(ldd $APP | grep -o '/[^ ]*/libc\.so\.6')")
 LIBS="$LIBDIR/libdrm.so.2 $LIBDIR/libasound.so.2"
-LIBS=$(printf '%s\n' $LIBS $(ldd $APP /usr/bin/amixer $LIBS | grep -o '/[^ :]*\.so[^ :]*') | sort -u)
+# PCs: extlinux reinstalls BIOS boot (syslinux) after init's first-boot resize; the Pi's firmware needs none.
+TOOLS=/usr/bin/amixer
+[ $ARCH = rpi ] || TOOLS="$TOOLS /usr/bin/extlinux"
+LIBS=$(printf '%s\n' $LIBS $(ldd $APP $TOOLS $LIBS | grep -o '/[^ :]*\.so[^ :]*') | sort -u)
 rm -rf $R
 : > $L.dirs
 : > $L.files
@@ -58,7 +61,7 @@ add() {   # add <path in image> <source> <mode>
 }
 add /init /src/boot/init 755
 add /bin/busybox /bin/busybox 755
-add /bin/amixer /usr/bin/amixer 755
+for t in $TOOLS; do add /bin/${t##*/} $t 755; done
 add /c93/continuum $APP 755
 for f in $LIBS; do add $f $f 755; done
 for f in $(find /usr/share/alsa -type f); do add $f $f 644; done

@@ -6,7 +6,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -272,7 +274,11 @@ int main(int argc, char** argv) {
     // Static from here on: on the web main() returns to the browser and the frame callback outlives its stack.
     static const bool mouseEnabled = !settings.flag("disableMouse");
 
-    static SDL_Window* window = SDL_CreateWindow("Continuum 93", kW * 3, kH * 3,
+    // C93_WINDOW_SCALE: the window in multiples of 480x270 (default 3). The boot images set 1: their display
+    // scales a small window in hardware, so the CPU draws only the machine's own pixels (D-42).
+    const char* ws = SDL_getenv("C93_WINDOW_SCALE");
+    const int scale = ws && std::atoi(ws) > 0 ? std::atoi(ws) : 3;
+    static SDL_Window* window = SDL_CreateWindow("Continuum 93", kW * scale, kH * scale,
                                                  SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
                                                  SDL_WINDOW_FILL_DOCUMENT |   // web: follow the page; elsewhere SDL drops it
                                                  (settings.flag("fullscreen") ? SDL_WINDOW_FULLSCREEN : 0));
@@ -376,6 +382,17 @@ int main(int argc, char** argv) {
         }
         pollInput(window, video.renderer());
         service::view() ? service::draw() : video.present(*machine);
+
+        // Every 30 s: frames shown and the slowest one, to compare hardware (the pointer lags by whole frames).
+        static uint64_t since = SDL_GetTicksNS(), last = since, worst = 0;
+        static int frames = 0;
+        uint64_t now = SDL_GetTicksNS();
+        worst = std::max(worst, now - last);
+        last = now;
+        if (++frames, now - since >= 30'000'000'000ull) {
+            LOGI("Video: %.1f fps over %.0f s, slowest frame %.1f ms", frames * 1e9 / double(now - since), (now - since) / 1e9, worst / 1e6);
+            since = now, worst = 0, frames = 0;
+        }
         return !quit;
     };
 #ifdef __EMSCRIPTEN__

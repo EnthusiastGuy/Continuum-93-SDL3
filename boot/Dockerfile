@@ -7,7 +7,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
       libdrm-dev libgbm-dev libegl-dev libgles-dev libasound2-dev \
       gcc make bc flex bison libelf-dev libssl-dev cpio xz-utils zstd curl \
       alsa-utils busybox-static mtools fdisk zip \
-      $(case $(dpkg --print-architecture) in amd64|i386) echo syslinux syslinux-common;; esac) \
+      $(case $(dpkg --print-architecture) in amd64|i386) echo syslinux syslinux-common extlinux;; esac) \
     && rm -rf /var/lib/apt/lists/*
 # lld: clang's -flto needs an LTO-capable linker. The kernel build unsets these (PCs: gcc; Pi: LLVM=-16).
 ENV CC=clang-16 CXX=clang++-16 LDFLAGS=-fuse-ld=lld HOME=/tmp MTOOLS_SKIP_CHECK=1

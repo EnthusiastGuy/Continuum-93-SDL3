@@ -23,8 +23,10 @@ two containers: its emulator in an emulated arm64 one (slow the first time), its
 2. PC: boot from it (boot menu key: F12, F11, F8 or Esc, depending on the maker). **Secure Boot must
    be off**: the kernel is not signed. Pi: put the card in and power on (a Pi 3B+, 4 or 5 also boots from
    a USB stick when no card is in).
-3. Quitting Continuum (the guest's shutdown) powers the PC off; a Pi 3/4 halts (unplug it), a Pi 5 powers off.
-4. Picture squashed or stretched (the monitor stretches a mode of another shape)? Press **Shift+F11** until it
+3. The first boot gives the partition the whole stick or card (a few seconds, "Do not unplug" on screen):
+   the image is 64 MB, the rest of the device is yours for files. It happens once; nothing else is touched.
+4. Quitting Continuum (the guest's shutdown) powers the PC off; a Pi 3/4 halts (unplug it), a Pi 5 powers off.
+5. Picture squashed or stretched (the monitor stretches a mode of another shape)? Press **Shift+F11** until it
    looks right: auto, 4:3, 5:4, 16:10, 16:9, 21:9. It is saved in `Data/init.cfg` (`screenAspect`, D-39).
 
 The stick runs without the CRT filter (`crtFilter=false` in its `Data/init.cfg`; set it to `true` for the look).
@@ -51,22 +53,39 @@ continuum93/logs/      written at each boot: continuum.log (the emulator), kerne
     The firmware files (`bootcode.bin`, `start*.elf`, `fixup*.dat`) are Raspberry Pi's, release 1.20260915.
 - **Initramfs**: `boot/init` (busybox sh as PID 1), the emulator, glibc, libdrm, libasound and ALSA's
   config. Init mounts the FAT partition that has `Data/os` (USB storage needs ~0.5 s to appear; it
-  retries for 10 s), waits up to 5 s for the display (`/dev/dri/card0`: vc4 can finish after the card is up),
+  retries for 10 s), grows it on first boot (below), waits up to 5 s for the display (`/dev/dri/card0`: vc4 can finish after the card is up),
   links `/c93/Data` to it, runs `/c93/continuum`, then unmounts and powers off.
 - **Display, PCs**: no GPU drivers. The firmware sets a screen mode (UEFI: the EFI stub switches to the largest GOP
   mode, `video=efifb:auto`, normally the panel's native one; BIOS: VESA through `vga=`), the kernel's `simpledrm` exposes it, and SDL draws into it with its software renderer. The emulator
   composites on the CPU anyway (the GPU path only saves time on big windows).
 - **Display, Pi**: KMS through `vc4` (`dtoverlay=vc4-kms-v3d`, as Raspberry Pi OS): HDMI at the monitor's own
-  mode, read from its EDID. SDL draws into dumb buffers, as on PCs; no 3D driver.
+  mode, read from its EDID. The emulator's 480x270 picture is scaled up by the display hardware (an overlay
+  plane, nearest neighbour), so the CPU only draws 480x270; no 3D driver.
+- **Frame rate**: continuum.log gets `Video: N fps over 30 s, slowest frame M ms` every 30 s. The pointer is drawn
+  by the guest OS inside the frame, so it lags by whole frames: below 60 fps the lag grows.
 - **SDL patch** (`boot/sdl-bare.patch`, applied only for these images):
   - kmsdrm without libgbm: the window framebuffer in two DRM dumb buffers, page-flipped at vblank (vsync, no
     tearing; vc4 scans a buffer out as it is drawn, so one buffer flickered black on the Pi), instead of requiring
     Mesa (GBM + EGL). A driver without page flips gets one buffer and DIRTYFB; the log says which;
+  - a window smaller than the mode (the images ask for 480x270, `C93_WINDOW_SCALE=1`) goes on an overlay plane
+    that the display scales up, nearest neighbour, over a black full-mode buffer: the CPU draws 480x270 pixels a
+    frame instead of the whole screen (D-42). Mouse speed is scaled to match. Drivers without a scaling overlay
+    (simpledrm on PCs) give the window the mode's size instead, as before;
   - evdev without libudev: scans `/dev/input` and rescans when it changes (hotplug), guessing each
     device's class from its capabilities, as SDL's joystick code already does.
 - **Input**: USB (and on PCs PS/2) keyboards and mice, USB gamepads (generic HID, Xbox, PlayStation, Switch).
 - **Sound**: PCs: Intel HDA (most PCs since 2005), AC'97; Pi: HDMI and the 3.5 mm jack (Pi 3/4); USB audio
   everywhere. Through ALSA.
+
+## First-boot resize
+
+The image is 64 MB so it downloads and writes fast. FAT32 cannot grow in place (its allocation table would
+have to move the data), so init does what installers do: when more than 64 MB lie unused after partition 1
+(MBR, type 0x0C: only our own layout), it copies the partition's files to RAM (~20 MB), writes the new size into
+the MBR, formats the partition again (busybox `mkdosfs`, label C93, the hidden-sectors field fixed for BIOS
+boot), copies the files back and, on PCs, reinstalls syslinux with `extlinux`. ~0.7 s on a PC in QEMU. Each
+step goes to the kernel log (`c93 init: ...` in kernel.log). Losing power mid-way leaves a stick to rewrite;
+there is nothing of the user's on it yet. MBR caps the partition at 2 TiB.
 
 ## Testing
 
@@ -77,6 +96,8 @@ continuum93/logs/      written at each boot: continuum.log (the emulator), kerne
 docker build -t c93-qemu boot/test
 docker run --rm --device /dev/kvm -v "$PWD/build/boot-x64:/img" -v "$PWD/boot/test:/q" -v "$PWD/build/qemu:/out" c93-qemu sh /q/run.sh /img/continuum93-boot-x64.img uefi 15
 ```
+
+`DISK=1G` (env) enlarges the test copy first, a bigger stick, and keeps it as `/out/<fw>/disk.img` for a second boot.
 
 Verified so far (2026-11-04, QEMU 7.2): x64 on UEFI and BIOS, x86 on BIOS and 32-bit UEFI: Halcyon comes
 up, USB keyboard (F1 opens service mode) and mouse work, HDA sound plays, Halcyon's Shut down powers the
@@ -100,7 +121,8 @@ USB (`dwc_otg`) finds QEMU's keyboard. The display, input and sound on a Pi are 
 - No Wi-Fi, no network: not needed by the emulator.
 - The power button does nothing (no ACPI button handling): shut down from the guest, or hold it to force off.
   Logs are only complete after a guest shutdown.
-- The sound card is ALSA's default (card 0). On PCs where card 0 is HDMI-only audio, sound goes to the monitor;
-  on a Pi it is the 3.5 mm jack or HDMI, whichever the kernel registers first.
+- The sound card is ALSA's default (card 0). On PCs where card 0 is HDMI-only audio, sound goes to the monitor.
+  On a Pi 4/5 init picks the HDMI port with a monitor (each port is a card); a DVI monitor or one without speakers
+  gives no HDMI sound: use the 3.5 mm jack (Pi 3/4) or USB audio.
 - Pi: the boot firmware is Raspberry Pi's closed code (redistributable, `LICENCE.broadcom` on the card). The
   Pi 5 has no 3.5 mm jack: HDMI or USB audio. How fast the emulator runs on a Pi 3 is not measured yet.
